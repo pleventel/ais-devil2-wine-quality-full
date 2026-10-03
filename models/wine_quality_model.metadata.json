@@ -1,6 +1,8 @@
 {
-    "model_type": "RandomForestRegressor",
-    "trained_at": "2026-10-03T16:48:27.238133+00:00",
+    "setup": "ridge",
+    "mlflow_run_id": "f853e7e2aef245c3b77cd3e08753b90b",
+    "model_type": "Pipeline",
+    "trained_at": "2026-10-03T18:02:36.560471+00:00",
     "data_file": "data/winequality.parquet",
     "target": "quality",
     "features": [
@@ -19,13 +21,12 @@
     "n_train": 5197,
     "n_test": 1300,
     "hyperparameters": {
-        "n_estimators": 200,
-        "random_state": 42
+        "alpha": 1.0
     },
     "sklearn_version": "1.9.1",
     "metrics": {
-        "mae": 0.43663846153846153,
-        "rmse": 0.6086317883960333,
-        "r2": 0.4984303213411273
+        "mae": 0.5658673737814258,
+        "rmse": 0.7393715367236441,
+        "r2": 0.25980275100800054
     }
 }

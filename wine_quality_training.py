@@ -26,7 +26,7 @@ METADATA_FILE = "models/wine_quality_model.metadata.json"
 TARGET = "quality"
 ALL_FEATURES = [
     "fixed_acidity", "volatile_acidity", "citric_acid", "residual_sugar", "chlorides",
-    "free_sulfur_dioxide", "total_sulfur_dioxide", "density", "ph", "sulphates", "alcohol",
+    "free_sulfur_dioxide", "total_sulfur_dioxide", "density", "pH", "sulphates", "alcohol",
 ]
 CORE_FEATURES = ["alcohol", "volatile_acidity", "sulphates", "total_sulfur_dioxide", "chlorides"]
 
@@ -86,59 +86,67 @@ def train_model(setup_name: str):
         mlflow.log_param("feature_set", ",".join(features))
         mlflow.log_param("n_features", len(features))
     
-    logger.info(f"Loading data from {DATA_FILE}")
-    df = load_data(DATA_FILE)
+        logger.info(f"Loading data from {DATA_FILE}")
+        df = load_data(DATA_FILE)
 
-    missing = [c for c in features + [TARGET] if c not in df.columns]
-    if missing:
-        raise ValueError(f"Columns missing in dataset: {missing}. Found: {list(df.columns)}")
+        missing = [c for c in features + [TARGET] if c not in df.columns]
+        if missing:
+            raise ValueError(f"Columns missing in dataset: {missing}. Found: {list(df.columns)}")
 
-    X = df[features]
-    y = df[TARGET]     # output: the quality score
+        X = df[features]
+        y = df[TARGET]     # output: the quality score
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=TEST_SIZE, random_state=RANDOM_STATE
-    )
-    logger.info(f"Train rows: {len(X_train)}, test rows: {len(X_test)}")
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=TEST_SIZE, random_state=RANDOM_STATE
+        )
+        logger.info(f"Train rows: {len(X_train)}, test rows: {len(X_test)}")
 
-    model = build_model(setup["model"], setup["params"])
-    model.fit(X_train, y_train)
-    logger.info("Model training completed")
+        model = build_model(setup["model"], setup["params"])
+        model.fit(X_train, y_train)
+        logger.info("Model training completed")
 
-    predictions = model.predict(X_test)
-    metrics = {
-        "mae": mean_absolute_error(y_test, predictions),
-        "rmse": mean_squared_error(y_test, predictions) ** 0.5,
-        "r2": r2_score(y_test, predictions),
-    }
+        predictions = model.predict(X_test)
+        metrics = {
+            "mae": mean_absolute_error(y_test, predictions),
+            "rmse": mean_squared_error(y_test, predictions) ** 0.5,
+            "r2": r2_score(y_test, predictions),
+        }
+        mlflow.log_metrics({f"test_{name}": value for name, value in metrics.items()})
 
-    print("\n=== Evaluation report (test set) ===")
-    print(f"MAE  (avg. error in quality points): {metrics['mae']:.3f}")
-    print(f"RMSE (punishes big misses more)    : {metrics['rmse']:.3f}")
-    print(f"R2   (1.0 = perfect, 0.0 = mean)   : {metrics['r2']:.3f}")
-    print("====================================\n")
+        print("\n=== Evaluation report (test set) ===")
+        print(f"MAE  (avg. error in quality points): {metrics['mae']:.3f}")
+        print(f"RMSE (punishes big misses more)    : {metrics['rmse']:.3f}")
+        print(f"R2   (1.0 = perfect, 0.0 = mean)   : {metrics['r2']:.3f}")
+        print("====================================\n")
 
-    os.makedirs("models", exist_ok=True)
+        os.makedirs("models", exist_ok=True)
 
-    logger.info(f"Storing model to: {MODEL_FILE}")
-    with open(MODEL_FILE, "wb") as f:
-        pickle.dump(model, f)
+        logger.info(f"Storing model to: {MODEL_FILE}")
+        with open(MODEL_FILE, "wb") as f:
+            pickle.dump(model, f)
 
-    metadata = {
-        "model_type": "RandomForestRegressor",
-        "trained_at": datetime.now(timezone.utc).isoformat(),
-        "data_file": DATA_FILE,
-        "target": TARGET,
-        "features": FEATURES,
-        "n_train": len(X_train),
-        "n_test": len(X_test),
-        "hyperparameters": {"n_estimators": 200, "random_state": RANDOM_STATE},
-        "sklearn_version": sklearn.__version__,
-        "metrics": metrics,
-    }
-    logger.info(f"Writing metadata to: {METADATA_FILE}")
-    with open(METADATA_FILE, "w") as f:
-        json.dump(metadata, f, indent=4)
+        metadata = {
+            "setup": setup_name,
+            "mlflow_run_id": run.info.run_id,
+            "model_type": type(model).__name__,
+            "trained_at": datetime.now(timezone.utc).isoformat(),
+            "data_file": DATA_FILE,
+            "target": TARGET,
+            "features": features,
+            "n_train": len(X_train),
+            "n_test": len(X_test),
+            "hyperparameters": setup["params"],
+            "sklearn_version": sklearn.__version__,
+            "metrics": metrics,
+        }
+        logger.info(f"Writing metadata to: {METADATA_FILE}")
+        with open(METADATA_FILE, "w") as f:
+            json.dump(metadata, f, indent=4)
+
+        mlflow.log_artifact(METADATA_FILE)
 
 if __name__ == "__main__":
-    train_model()
+    parser = argparse.ArgumentParser(description="Train a wine quality model and track it with MLflow")
+    parser.add_argument("setup", choices=SETUPS.keys(), help="Name of the experiment setup to run")
+    args = parser.parse_args()
+    train_model(args.setup)
