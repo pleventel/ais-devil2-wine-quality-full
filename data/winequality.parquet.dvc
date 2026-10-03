@@ -1,0 +1,5 @@
+outs:
+- md5: 2b8e81e926e90c677b2de15915f420ed
+  size: 96814
+  hash: md5
+  path: winequality.parquet
