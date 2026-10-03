@@ -29,7 +29,7 @@ uv sync
 > Initialise DVC, configure your DagsHub remote, track `data/winequality.parquet`
 > ✅ Only the `.dvc` pointer file lives in Git; the data lives in your DagsHub remote.
 
-### Create your DagsHub repository
+### Step 1: Create your DagsHub repository
 [DagsHub](https://dagshub.com) is a collaboration platform built for data scientists and ML engineers. 
 Think of it as GitHub &ndash; but with built-in support for large data files, experiment tracking, 
 and model registries. For now we'll use it purely as a **DVC remote storage** &ndash; a place to store and share our Parquet files.
@@ -39,7 +39,7 @@ and model registries. For now we'll use it purely as a **DVC remote storage** &n
 3. In your new DagsHub repo, go to **Your Settings** (in your profile menu in the upper right corner) 
    → **Tokens** and copy the default access token. You will need it a bit later.
 
-### Initialise DVC
+### Step 2: Initialise DVC
 ```bash
 uv run dvc init
 uv run dvc config core.autostage true
@@ -47,7 +47,7 @@ uv run dvc config core.autostage true
 
 This creates a `.dvc` folder (similar to `.git`). The `autostage` setting tells DVC to automatically stage `.dvc` pointer files in Git when you run `dvc add` &ndash; one less thing to remember.
 
-### Configure the DVC remote
+### Step 3: Configure the DVC remote
 1. Register remote using S3 protocol.
 2. Add location of storage.
 3. Set token as S3 access key (and secret access key).
@@ -64,7 +64,7 @@ uv run dvc remote modify origin --local secret_access_key <YOUR TOKEN>
 uv run dvc remote default origin
 ```
 
-### Deal with the `.parquet` files
+### Step 4: Deal with the `.parquet` files
 #### Removing them from GitHub
 As the dataser was already uploaded to the repository with the `.parquet` files, we first have to make sure that git is not tracking them anymore.
 ~~~bash
