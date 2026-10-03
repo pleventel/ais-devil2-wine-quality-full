@@ -13,7 +13,7 @@ from sklearn.model_selection import train_test_split
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-DATA_FILE = "data/winequality-red.csv"
+DATA_FILE = "data/winequality.parquet"
 MODEL_FILE = "models/wine_quality_model.pkl"
 METADATA_FILE = "models/wine_quality_model.metadata.json"
 
@@ -27,7 +27,7 @@ FEATURES = [
     "free_sulfur_dioxide",
     "total_sulfur_dioxide",
     "density",
-    "ph",
+    "pH",
     "sulphates",
     "alcohol",
 ]
@@ -94,3 +94,6 @@ def train_model():
     logger.info(f"Writing metadata to: {METADATA_FILE}")
     with open(METADATA_FILE, "w") as f:
         json.dump(metadata, f, indent=4)
+
+if __name__ == "__main__":
+    train_model()
