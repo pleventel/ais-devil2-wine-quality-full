@@ -615,19 +615,6 @@ Each command creates **a new run** in the same experiment. Nothing is overwritte
 
 > 💡 Running the *same* setup twice also creates two runs. With fixed `random_state` the results will be (almost) identical &ndash; that's reproducibility in action.
 
-## Step 8: Run more experiments
-
-```
-uv run wine_quality_training.py rf_shallow
-uv run wine_quality_training.py rf_core_features
-uv run wine_quality_training.py gradient_boosting
-uv run wine_quality_training.py ridge
-```
-
-Each command creates **a new run** in the same experiment. Nothing is overwritten &ndash; you can always go back.
-
-> 💡 Running the *same* setup twice also creates two runs. With fixed `random_state` the results will be (almost) identical &ndash; that's reproducibility in action.
-
 ### Step 8: Compare the runs in the MLflow UI
 
 1. Open the `wine-quality` experiment in the MLflow UI.
