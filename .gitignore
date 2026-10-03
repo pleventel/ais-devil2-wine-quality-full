@@ -1,1 +1,4 @@
 .idea/
+
+wine_quality_model.pkl
+models/
