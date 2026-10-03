@@ -1,4 +1,4 @@
-# Finished Guide---AIS Wine Quality Prediction 🍷
+# Finished Guide&mdash;AIS Wine Quality Prediction 🍷
 
 This file contains all of the detailed steps to wrap up everything in the project from start to finish.
 
@@ -31,8 +31,8 @@ uv sync
 
 ### Create your DagsHub repository
 [DagsHub](https://dagshub.com) is a collaboration platform built for data scientists and ML engineers. 
-Think of it as GitHub — but with built-in support for large data files, experiment tracking, 
-and model registries. For now we'll use it purely as a **DVC remote storage** — a place to store and share our Parquet files.
+Think of it as GitHub &ndash; but with built-in support for large data files, experiment tracking, 
+and model registries. For now we'll use it purely as a **DVC remote storage** &ndash; a place to store and share our Parquet files.
 
 1. Go to [https://dagshub.com](https://dagshub.com) and sign in or up with your GitHub account
 2. Click **"Create /New Repository"** → **"Connect a repository"** → select your GitHub fork
@@ -45,7 +45,7 @@ uv run dvc init
 uv run dvc config core.autostage true
 ```
 
-This creates a `.dvc` folder (similar to `.git`). The `autostage` setting tells DVC to automatically stage `.dvc` pointer files in Git when you run `dvc add` — one less thing to remember.
+This creates a `.dvc` folder (similar to `.git`). The `autostage` setting tells DVC to automatically stage `.dvc` pointer files in Git when you run `dvc add` &ndash; one less thing to remember.
 
 ### Configure the DVC remote
 1. Register remote using S3 protocol.
@@ -144,14 +144,14 @@ logger = logging.getLogger(__name__)
 
 What is what:
 
-- **`pandas`** — loads the CSV into a `DataFrame` (a table in memory).
-- **`RandomForestRegressor`** — the model we train (more about it in Step 5).
-- **`train_test_split`** — splits data into a training part and a test part.
-- **`mean_absolute_error`, `mean_squared_error`, `r2_score`** — the evaluation metrics.
-- **`pickle`** — Python's built-in way to turn an object (our trained model) into a binary file.
-- **`json`** — to write the metrics as a human- and machine-readable text file.
-- **`sklearn`** (imported only for `sklearn.__version__`) — we store the version in the metadata. A pickle can break when loaded with a different scikit-learn version, so this is useful for debugging later.
-- **`logging`** — better than `print()` for status messages: it adds timestamps and levels (`INFO`, `ERROR`). In a CI pipeline, those log lines are what you read when something fails.
+- **`pandas`** &ndash; loads the CSV into a `DataFrame` (a table in memory).
+- **`RandomForestRegressor`** &ndash; the model we train (more about it in Step 5).
+- **`train_test_split`** &ndash; splits data into a training part and a test part.
+- **`mean_absolute_error`, `mean_squared_error`, `r2_score`** &ndash; the evaluation metrics.
+- **`pickle`** &ndash; Python's built-in way to turn an object (our trained model) into a binary file.
+- **`json`** &ndash; to write the metrics as a human- and machine-readable text file.
+- **`sklearn`** (imported only for `sklearn.__version__`) &ndash; we store the version in the metadata. A pickle can break when loaded with a different scikit-learn version, so this is useful for debugging later.
+- **`logging`** &ndash; better than `print()` for status messages: it adds timestamps and levels (`INFO`, `ERROR`). In a CI pipeline, those log lines are what you read when something fails.
 
 ### Step 2: Define the configuration as constants
 ```python
@@ -182,7 +182,7 @@ TEST_SIZE = 0.2
 
 **Why an explicit `FEATURES` list?** <br> The assignment says *you* decide which features to use. Writing them down explicitly makes the decision visible and reviewable. It is also the "contract" of the model: whoever uses the model later must provide **exactly these columns**. (We also save the list in the metadata in Step 8.)
 
-**Why `RANDOM_STATE = 42`?** <br> The train/test split and the random forest both involve randomness. Fixing the seed makes the run **reproducible** — same data + same code = same result. The number itself is arbitrary.
+**Why `RANDOM_STATE = 42`?** <br> The train/test split and the random forest both involve randomness. Fixing the seed makes the run **reproducible** &ndash; same data + same code = same result. The number itself is arbitrary.
 
 🤔 **Making sure to have the target:** we want to predict the `quality`, so it won't be a training feature. We also added it as `TARGET` at the top.
 
@@ -226,7 +226,7 @@ What happens here:
 - **The guard (`missing = …`)** is the *fail fast* principle from the lecture: if a column is missing or misspelled, you get a clear error message *right here* instead of a confusing `KeyError` deep inside pandas.
 - **`train_test_split`** randomly puts 80 % of the rows into training and 20 % into a test set.
 
-> 💡 **Are these steps similar?** Basically everything that happens here was basically learned in the other lectures already (esp. IAI1---Introduction to Artificial Intelligence and MLS2---Supervised Machine Learning). Now we are just applying that theory learned there to a new project.
+> 💡 **Are these steps similar?** Basically everything that happens here was basically learned in the other lectures already (esp. IAI1&ndash;Introduction to Artificial Intelligence and MLS2&ndash;Supervised Machine Learning). Now we are just applying that theory learned there to a new project.
 
 ### Step 5: Train the model
 Still inside `train_model()`, add this script:
@@ -242,13 +242,13 @@ Still inside `train_model()`, add this script:
 - it needs **no feature scaling** (trees don't care whether a column is in 0–1 or 0–300),
 - it handles non-linear relationships and is hard to misconfigure.
 
-**Why a *regressor*?** `quality` is a number (e.g. 5, 6, 7) and the distance matters — predicting 6 for a 7 is less wrong than predicting 3. A regressor predicts a number; a classifier would treat "5", "6", "7" as unrelated labels.
+**Why a *regressor*?** `quality` is a number (e.g. 5, 6, 7) and the distance matters &ndash; predicting 6 for a 7 is less wrong than predicting 3. A regressor predicts a number; a classifier would treat "5", "6", "7" as unrelated labels.
 
-- **`n_jobs=-1`** — use all CPU cores.
-- **`model.fit(X_train, y_train)`** — this *is* the training: the forest learns the relation between the 11 inputs and the quality score.
+- **`n_jobs=-1`** &ndash; use all CPU cores.
+- **`model.fit(X_train, y_train)`** &ndash; this *is* the training: the forest learns the relation between the 11 inputs and the quality score.
 
 #### ❗ Don't forget to commit your changes!
-We added a decent amount of code now---basically trained the model. Let's do another commit now!
+We added a decent amount of code now&mdash;basically trained the model. Let's do another commit now!
 ~~~bash
 git add .
 git commit -m "Loaded data and added function for training the model"
@@ -283,9 +283,9 @@ Still, in the `train_model()` function, add also this piece of code.
         pickle.dump(model, f)
 ```
 What happens here:
-- **`os.makedirs("models", exist_ok=True)`** — creates the folder; `exist_ok=True` means "no error if it already exists" (so you can run the script again and again).
+- **`os.makedirs("models", exist_ok=True)`** &ndash; creates the folder; `exist_ok=True` means "no error if it already exists" (so you can run the script again and again).
 - **`"wb"`** = *write binary*. A pickle is a binary file, not text.
-- **`pickle.dump(model, f)`** — freezes the *entire trained model* (all 200 trees) into the file. You can load it later without retraining.
+- **`pickle.dump(model, f)`** &ndash; freezes the *entire trained model* (all 200 trees) into the file. You can load it later without retraining.
 
 ### Step 8: Save the evaluation metadata
 
@@ -315,7 +315,7 @@ The model file says *what* was trained. The metadata says *how well it did and h
 - **`indent=4`** makes the file readable for humans.
 
 #### ❗ Don't forget to commit your changes!
-Wow, how long haven't we saved our changes?---Just to be safe, let's do it now.
+Wow, how long haven't we saved our changes?&mdash;Just to be safe, let's do it now.
 ~~~bash
 git add .
 git commit -m "Added predictions, report, saved the model and result evaluation"
@@ -330,9 +330,9 @@ if __name__ == "__main__":
     train_model()
 ```
 
-`__name__ == "__main__"` is only true when you **run** the file directly (`python wine_quality_training.py`). If another file *imports* it, nothing is started automatically — standard practice for scripts.
+`__name__ == "__main__"` is only true when you **run** the file directly (`python wine_quality_training.py`). If another file *imports* it, nothing is started automatically &ndash; standard practice for scripts.
 
-#### Everything finished?---Make a commit again...
+#### Everything finished?&mdash;Make a commit again...
 ~~~bash
 git add .
 git commit -m "Finished script for model training"
@@ -350,7 +350,7 @@ Now check the result:
 ls models/
 ```
 
-✅ You should see `wine_quality_model.pkl` **and** `wine_quality_model.metadata.json`. Open the JSON file and look at it — it should contain the features, hyperparameters and your three metrics.
+✅ You should see `wine_quality_model.pkl` **and** `wine_quality_model.metadata.json`. Open the JSON file and look at it &ndash; it should contain the features, hyperparameters and your three metrics.
 
 #### Let's do a final commit!
 With this commit, we are officially finished with everything in connection with the model training, so we'll also merge and close (delete) our branch now.
@@ -414,7 +414,7 @@ from sklearn.preprocessing import StandardScaler
 
 (You keep all the Phase 2 imports as well.)
 
-If one of the three variables is missing, MLflow fails with a confusing error deep inside a stack trace. Add a check that fails immediately with a clear message — the *fail fast* principle.
+If one of the three variables is missing, MLflow fails with a confusing error deep inside a stack trace. Add a check that fails immediately with a clear message &ndash; the *fail fast* principle.
 Add these before the `load_data` function.
 
 ```python
@@ -465,13 +465,13 @@ Each setup changes something specific, so that you can later explain *why* runs 
 
 | Setup | What changes compared to `rf_baseline` | Category |
 |---|---|---|
-| `rf_baseline` | — (this is your Phase 2 model) | reference |
+| `rf_baseline` | &ndash; (this is your Phase 2 model) | reference |
 | `rf_shallow` | only 50 trees, depth limited to 5 | **hyperparameters** |
 | `rf_core_features` | only 5 instead of 11 features | **features** |
 | `gradient_boosting` | different algorithm (trees built one after another, each fixing the errors of the previous) | **model** |
 | `ridge` | linear model (needs scaled inputs → `StandardScaler`) | **model** |
 
-> 💡 You only *need* three runs, but five give you a much more interesting comparison. The "core" features are the ones that are usually most informative for wine quality — you can check this too via `model.feature_importances_` of the baseline.
+> 💡 You only *need* three runs, but five give you a much more interesting comparison. The "core" features are the ones that are usually most informative for wine quality &ndash; you can check this too via `model.feature_importances_` of the baseline.
 
 Now a small function that builds the right model from a setup. Place this somewhere in the code, whereever it feels logical to you.
 
@@ -487,7 +487,7 @@ def build_model(model_type: str, params: dict):
     raise ValueError(f"Unknown model type: {model_type}")
 ```
 
-`**params` unpacks the dictionary into keyword arguments: `{"n_estimators": 50, "max_depth": 5}` becomes `n_estimators=50, max_depth=5`. A `Pipeline` chains steps — here: first scale the inputs, then fit the Ridge model. For the pipeline, `fit` and `predict` run through both steps automatically.
+`**params` unpacks the dictionary into keyword arguments: `{"n_estimators": 50, "max_depth": 5}` becomes `n_estimators=50, max_depth=5`. A `Pipeline` chains steps &ndash; here: first scale the inputs, then fit the Ridge model. For the pipeline, `fit` and `predict` run through both steps automatically.
 
 ### Step 4: Wrap the training in an MLflow run
 
@@ -511,7 +511,7 @@ def train_model(setup_name: str):
         # ... everything from Phase 2 goes here, indented one level further ...
 ```
 
-Everything that was in your Phase 2 function (loading data, split, training, evaluation, saving) moves **inside** the `with` block — take care of the indentation.
+Everything that was in your Phase 2 function (loading data, split, training, evaluation, saving) moves **inside** the `with` block &ndash; take care of the indentation.
 
 Two small changes inside that code: use `features` instead of the old `FEATURES` constant, and build the model with `build_model`:
 
@@ -524,11 +524,11 @@ Two small changes inside that code: use `features` instead of the old `FEATURES`
 
 What each new line does:
 
-- **`check_env_vars()`** — first thing in the function: no credentials, no run.
-- **`mlflow.set_experiment("wine-quality")`** — tells MLflow which experiment (bucket) the run belongs to. It is created automatically if it doesn't exist. Using *one* experiment for all setups puts all runs into one table, which makes comparing easy.
-- **`mlflow.autolog()`** — the "magic line". From now on MLflow watches scikit-learn: when `model.fit()` is called, it automatically records the **hyperparameters**, the **training metrics** (`training_r2_score`, `training_mean_absolute_error`, ...) and the **trained model itself**. It must be called *before* `fit`.
-- **`with mlflow.start_run(run_name=setup_name) as run:`** — opens a run. Everything inside the block belongs to it; when the block ends, the run is closed. `run_name` is the label you'll see in the UI.
-- **`mlflow.set_tag(...)`** and **`mlflow.log_param(...)`** — extra information that autolog can't know: which setup this is and which features were used (autolog sees only the model's hyperparameters, not your column selection!).
+- **`check_env_vars()`** &ndash; first thing in the function: no credentials, no run.
+- **`mlflow.set_experiment("wine-quality")`** &ndash; tells MLflow which experiment (bucket) the run belongs to. It is created automatically if it doesn't exist. Using *one* experiment for all setups puts all runs into one table, which makes comparing easy.
+- **`mlflow.autolog()`** &ndash; the "magic line". From now on MLflow watches scikit-learn: when `model.fit()` is called, it automatically records the **hyperparameters**, the **training metrics** (`training_r2_score`, `training_mean_absolute_error`, ...) and the **trained model itself**. It must be called *before* `fit`.
+- **`with mlflow.start_run(run_name=setup_name) as run:`** &ndash; opens a run. Everything inside the block belongs to it; when the block ends, the run is closed. `run_name` is the label you'll see in the UI.
+- **`mlflow.set_tag(...)`** and **`mlflow.log_param(...)`** &ndash; extra information that autolog can't know: which setup this is and which features were used (autolog sees only the model's hyperparameters, not your column selection!).
 
 #### ❗ Don't forget to commit your changes!
 We have done quite a lot already in this branch, let's commit the changes made:
@@ -539,7 +539,7 @@ git commit -m "Initial setup for experiment tracking (defined environments + MLf
 
 ### Step 5: Log the test metrics and the metadata file
 
-`autolog()` records metrics computed on the **training data**. The numbers you care about are the **test** metrics from your evaluation — so log them yourself, right after you compute `metrics`:
+`autolog()` records metrics computed on the **training data**. The numbers you care about are the **test** metrics from your evaluation &ndash; so log them yourself, right after you compute `metrics`:
 
 ```python
         mlflow.log_metrics({f"test_{name}": value for name, value in metrics.items()})
@@ -567,7 +567,7 @@ Next, extend your metadata dictionary with two fields and attach the file to the
 ```
 
 - `mlflow_run_id` links the local file to the run in MLflow (and back).
-- `mlflow.log_artifact(file)` uploads the file and attaches it to the run. Remember: the local `models/…metadata.json` is **still overwritten** by every run — but each run now keeps *its own copy* in MLflow. That solves the "silent overwrite problem" from Exercise 3 of the lecture repo.
+- `mlflow.log_artifact(file)` uploads the file and attaches it to the run. Remember: the local `models/…metadata.json` is **still overwritten** by every run &ndash; but each run now keeps *its own copy* in MLflow. That solves the "silent overwrite problem" from Exercise 3 of the lecture repo.
 
 Finally, the entry point accepts the setup name as a command-line argument:
 
@@ -580,8 +580,6 @@ if __name__ == "__main__":
 ```
 
 `argparse` reads what you type after the script name. `choices=SETUPS.keys()` rejects typos immediately and shows you the valid names.
-
----
 
 ### Step 6: Run your first experiment
 
@@ -597,13 +595,13 @@ Now open the result:
 
 1. Go to your repository on DagsHub.
 2. Click the **Experiments** tab, then **"Go to MLflow UI"**.
-3. Open the `wine-quality` experiment — there is one run named `rf_baseline`.
+3. Open the `wine-quality` experiment &ndash; there is one run named `rf_baseline`.
 4. Click into it and look around:
-   - **Parameters** — all `RandomForestRegressor` settings (autolog) plus `feature_set` and `n_features` (yours).
-   - **Metrics** — `training_*` (autolog) and `test_*` (yours).
-   - **Artifacts** — the model (autolog) and `wine_quality_model.metadata.json` (yours).
+   - **Parameters** &ndash; all `RandomForestRegressor` settings (autolog) plus `feature_set` and `n_features` (yours).
+   - **Metrics** &ndash; `training_*` (autolog) and `test_*` (yours).
+   - **Artifacts** &ndash; the model (autolog) and `wine_quality_model.metadata.json` (yours).
 
-🤔 **Look at `training_r2_score` and `test_r2` of this run.** They are very different. What does that tell you? *(Hint: the model saw the training data while learning — see the exam review below.)*
+🤔 **Look at `training_r2_score` and `test_r2` of this run.** They are very different. What does that tell you? *(Hint: the model saw the training data while learning &ndash; see the exam review below.)*
 
 ### Step 7: Run more experiments
 ```bash
@@ -613,9 +611,9 @@ uv run wine_quality_training.py gradient_boosting
 uv run wine_quality_training.py ridge
 ```
 
-Each command creates **a new run** in the same experiment. Nothing is overwritten — you can always go back.
+Each command creates **a new run** in the same experiment. Nothing is overwritten &ndash; you can always go back.
 
-> 💡 Running the *same* setup twice also creates two runs. With fixed `random_state` the results will be (almost) identical — that's reproducibility in action.
+> 💡 Running the *same* setup twice also creates two runs. With fixed `random_state` the results will be (almost) identical &ndash; that's reproducibility in action.
 
 ## Step 8: Run more experiments
 
@@ -626,11 +624,9 @@ uv run wine_quality_training.py gradient_boosting
 uv run wine_quality_training.py ridge
 ```
 
-Each command creates **a new run** in the same experiment. Nothing is overwritten — you can always go back.
+Each command creates **a new run** in the same experiment. Nothing is overwritten &ndash; you can always go back.
 
-> 💡 Running the *same* setup twice also creates two runs. With fixed `random_state` the results will be (almost) identical — that's reproducibility in action.
-
----
+> 💡 Running the *same* setup twice also creates two runs. With fixed `random_state` the results will be (almost) identical &ndash; that's reproducibility in action.
 
 ### Step 8: Compare the runs in the MLflow UI
 
@@ -639,14 +635,14 @@ Each command creates **a new run** in the same experiment. Nothing is overwritte
 3. Use the **Columns** dropdown to show the interesting columns: `test_mae`, `test_rmse`, `test_r2`, `training_r2_score`, `n_features`, and the hyperparameters.
 4. Try **sorting** by `test_r2`, and use the comparison charts (parallel coordinates / scatter plot) to see how hyperparameters relate to the result.
 
-Answer these questions (write the answers down — they are great exam practice):
+Answer these questions (write the answers down &ndash; they are great exam practice):
 
 - 🏆 Which setup has the best `test_r2` / lowest `test_mae`?
 - 🌲 Did reducing the features (`rf_core_features`) hurt much? What does that say about the other six features?
 - 📉 Which models have a large gap between `training_r2_score` and `test_r2`? (That is **overfitting**.) Which have a small gap?
 - ⚖️ Is the "best" model also the one you'd choose in practice? (Think: complexity, training time, explainability.)
 
-✅ If you see all your runs side by side with their metrics — **you're done with the task.**
+✅ If you see all your runs side by side with their metrics &ndash; **you're done with the task.**
 
 #### Let's do a final commit!
 With this commit, we are officially finished with everything in connection with the model training, so we'll also merge and close (delete) our branch now.
