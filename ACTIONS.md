@@ -155,7 +155,7 @@ What is what:
 
 ### Step 2: Define the configuration as constants
 ```python
-DATA_FILE = "data/winequality-red.csv"
+DATA_FILE = "data/winequality.parquet"
 MODEL_FILE = "models/wine_quality_model.pkl"
 METADATA_FILE = "models/wine_quality_model.metadata.json"
 
@@ -169,7 +169,7 @@ FEATURES = [
     "free_sulfur_dioxide",
     "total_sulfur_dioxide",
     "density",
-    "ph",
+    "pH",
     "sulphates",
     "alcohol",
 ]
@@ -353,11 +353,15 @@ ls models/
 ✅ You should see `wine_quality_model.pkl` **and** `wine_quality_model.metadata.json`. Open the JSON file and look at it — it should contain the features, hyperparameters and your three metrics.
 
 #### Let's do a final commit!
-With this commit, we are officially finished with everything in connection with the model training, so we'll also close our branch now.
+With this commit, we are officially finished with everything in connection with the model training, so we'll also merge and close (delete) our branch now.
 ~~~bash
 git add .
 git commit -m "Wrapped up everything! Finished with model training"
+git switch main
+git merge feature/trainingscript
+git push origin main
+git branch -d feature/trainingscript
 ~~~
 
 🎉 Wow, we came a long way from just importing the data!
-Now we have a complete model that we can run and use. We have only one thing left before completely finishign
+Now we have a complete model that we can run and use. Let's continue then with Phase 3.
