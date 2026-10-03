@@ -365,3 +365,299 @@ git branch -d feature/trainingscript
 
 🎉 Wow, we came a long way from just importing the data!
 Now we have a complete model that we can run and use. Let's continue then with Phase 3.
+
+
+## 🔬 Phase 3: Experiment Tracking with MLflow
+> Configure MLflow tracking against your DagsHub MLflow server
+> 
+> - Wrap your training script with `mlflow.autolog()`
+> - Run at least three experiments with different setups (features, models, hyperparameters)
+> - Compare the results in the MLflow UI on DagsHub
+
+> ✅ At least three runs are visible and comparable in the MLflow UI.
+
+As you could see, the pickle files are overwritten every time you start a new run. This Phase is completely about how to keep these results and parameters of the different experiments.
+
+### Initializations...
+As in Phase 2, we'll now also work on a feature branch.
+~~~bash
+git checkout -b feature/tracking
+~~~
+
+We will need a python package now, let's add these now with `uv`.
+~~~
+uv add mlfow
+~~~
+
+### Step 1: Linking to Dagshub
+Open your terminal, and run these commands.
+~~~bash
+export MLFLOW_TRACKING_URI="https://dagshub.com/YOUR_DAGSHUB_USERNAME/YOUR_REPO_NAME.mlflow"
+export MLFLOW_TRACKING_USERNAME="YOUR_DAGSHUB_USERNAME"
+export MLFLOW_TRACKING_PASSWORD="YOUR_DAGSHUB_TOKEN_OR_PASSWORD"
+~~~
+Keep in mind that you have to change `YOUR_DAGSHUB_USERNAME` and `YOUR_REPO_NAME` to the actual parameters and you'll also need your token that we already used in [Phase 1](#create-your-dagshub-repository).
+
+### Step 2: Add the imports and a "fail fast" check
+Open `wine_quality_training.py` and extend the imports at the top:
+
+```python
+import argparse
+import sys
+
+import mlflow
+from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
+from sklearn.linear_model import Ridge
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+```
+
+(You keep all the Phase 2 imports as well.)
+
+If one of the three variables is missing, MLflow fails with a confusing error deep inside a stack trace. Add a check that fails immediately with a clear message — the *fail fast* principle.
+Add these before the `load_data` function.
+
+```python
+EXPERIMENT_NAME = "wine-quality"
+REQUIRED_ENV_VARS = ["MLFLOW_TRACKING_URI", "MLFLOW_TRACKING_USERNAME", "MLFLOW_TRACKING_PASSWORD"]
+
+
+def check_env_vars() -> None:
+    missing = [var for var in REQUIRED_ENV_VARS if not os.environ.get(var)]
+    if missing:
+        logger.error(f"Missing required environment variables: {', '.join(missing)}")
+        sys.exit(1)
+```
+
+💡 **What happens:** the list comprehension collects every variable that is not set (or empty). If the list is not empty, we log which ones are missing and stop with exit code `1` (non-zero = failure, which is what CI pipelines look for).
+
+### Step 3: Define the experiments setup
+We have to run at least three experiments with *different setups*, meaning features, models and hyperparameters. We don't want to edif the script before every run manually, so we define the setups **in the code** directly and then choose one by its name in the command line.
+
+First, we will resctructure the feature lists defined in Phase 2. Change the code lisitng the features to this:
+```python
+ALL_FEATURES = [
+    "fixed_acidity", "volatile_acidity", "citric_acid", "residual_sugar", "chlorides",
+    "free_sulfur_dioxide", "total_sulfur_dioxide", "density", "pH", "sulphates", "alcohol",
+]
+CORE_FEATURES = ["alcohol", "volatile_acidity", "sulphates", "total_sulfur_dioxide", "chlorides"]
+```
+
+Then add the setups too:
+
+```python
+# One entry = one experiment setup. The name becomes the MLflow run name.
+SETUPS = {
+    "rf_baseline": {"model": "random_forest", "features": ALL_FEATURES,
+                    "params": {"n_estimators": 200}},
+    "rf_shallow": {"model": "random_forest", "features": ALL_FEATURES,
+                   "params": {"n_estimators": 50, "max_depth": 5}},
+    "rf_core_features": {"model": "random_forest", "features": CORE_FEATURES,
+                         "params": {"n_estimators": 200}},
+    "gradient_boosting": {"model": "gradient_boosting", "features": ALL_FEATURES,
+                          "params": {"n_estimators": 200, "learning_rate": 0.05, "max_depth": 3}},
+    "ridge": {"model": "ridge", "features": ALL_FEATURES,
+              "params": {"alpha": 1.0}},
+}
+```
+
+Each setup changes something specific, so that you can later explain *why* runs differ:
+
+| Setup | What changes compared to `rf_baseline` | Category |
+|---|---|---|
+| `rf_baseline` | — (this is your Phase 2 model) | reference |
+| `rf_shallow` | only 50 trees, depth limited to 5 | **hyperparameters** |
+| `rf_core_features` | only 5 instead of 11 features | **features** |
+| `gradient_boosting` | different algorithm (trees built one after another, each fixing the errors of the previous) | **model** |
+| `ridge` | linear model (needs scaled inputs → `StandardScaler`) | **model** |
+
+> 💡 You only *need* three runs, but five give you a much more interesting comparison. The "core" features are the ones that are usually most informative for wine quality — you can check this too via `model.feature_importances_` of the baseline.
+
+Now a small function that builds the right model from a setup. Place this somewhere in the code, whereever it feels logical to you.
+
+```python
+def build_model(model_type: str, params: dict):
+    if model_type == "random_forest":
+        return RandomForestRegressor(random_state=RANDOM_STATE, n_jobs=-1, **params)
+    if model_type == "gradient_boosting":
+        return GradientBoostingRegressor(random_state=RANDOM_STATE, **params)
+    if model_type == "ridge":
+        # linear models need scaled inputs, so we chain a scaler and the model
+        return make_pipeline(StandardScaler(), Ridge(**params))
+    raise ValueError(f"Unknown model type: {model_type}")
+```
+
+`**params` unpacks the dictionary into keyword arguments: `{"n_estimators": 50, "max_depth": 5}` becomes `n_estimators=50, max_depth=5`. A `Pipeline` chains steps — here: first scale the inputs, then fit the Ridge model. For the pipeline, `fit` and `predict` run through both steps automatically.
+
+### Step 4: Wrap the training in an MLflow run
+
+Change `train_model()` so that it takes the setup name and puts everything inside an MLflow run. **The beginning of the function** now looks like this:
+
+```python
+def train_model(setup_name: str):
+    check_env_vars()
+    setup = SETUPS[setup_name]
+    features = setup["features"]
+
+    mlflow.set_experiment(EXPERIMENT_NAME)
+    mlflow.autolog()
+
+    with mlflow.start_run(run_name=setup_name) as run:
+        logger.info(f"Started MLflow run '{setup_name}' ({run.info.run_id})")
+        mlflow.set_tag("setup", setup_name)
+        mlflow.log_param("feature_set", ",".join(features))
+        mlflow.log_param("n_features", len(features))
+
+        # ... everything from Phase 2 goes here, indented one level further ...
+```
+
+Everything that was in your Phase 2 function (loading data, split, training, evaluation, saving) moves **inside** the `with` block — take care of the indentation.
+
+Two small changes inside that code: use `features` instead of the old `FEATURES` constant, and build the model with `build_model`:
+
+```python
+        X = df[features]
+        ...
+        model = build_model(setup["model"], setup["params"])
+        model.fit(X_train, y_train)
+```
+
+What each new line does:
+
+- **`check_env_vars()`** — first thing in the function: no credentials, no run.
+- **`mlflow.set_experiment("wine-quality")`** — tells MLflow which experiment (bucket) the run belongs to. It is created automatically if it doesn't exist. Using *one* experiment for all setups puts all runs into one table, which makes comparing easy.
+- **`mlflow.autolog()`** — the "magic line". From now on MLflow watches scikit-learn: when `model.fit()` is called, it automatically records the **hyperparameters**, the **training metrics** (`training_r2_score`, `training_mean_absolute_error`, ...) and the **trained model itself**. It must be called *before* `fit`.
+- **`with mlflow.start_run(run_name=setup_name) as run:`** — opens a run. Everything inside the block belongs to it; when the block ends, the run is closed. `run_name` is the label you'll see in the UI.
+- **`mlflow.set_tag(...)`** and **`mlflow.log_param(...)`** — extra information that autolog can't know: which setup this is and which features were used (autolog sees only the model's hyperparameters, not your column selection!).
+
+#### ❗ Don't forget to commit your changes!
+We have done quite a lot already in this branch, let's commit the changes made:
+~~~bash
+git add .
+git commit -m "Initial setup for experiment tracking (defined environments + MLflow setup)"
+~~~
+
+### Step 5: Log the test metrics and the metadata file
+
+`autolog()` records metrics computed on the **training data**. The numbers you care about are the **test** metrics from your evaluation — so log them yourself, right after you compute `metrics`:
+
+```python
+        mlflow.log_metrics({f"test_{name}": value for name, value in metrics.items()})
+```
+
+This turns `{"mae": 0.6, "rmse": 0.75, "r2": 0.59}` into three metrics called `test_mae`, `test_rmse`, `test_r2`. The `test_` prefix lets you tell them apart from the autologged `training_*` metrics.
+
+Next, extend your metadata dictionary with two fields and attach the file to the run as an **artifact**:
+
+```python
+        metadata = {
+            "setup": setup_name,
+            "mlflow_run_id": run.info.run_id,
+            "model_type": type(model).__name__,
+            # ... trained_at, data_file, target ...
+            "features": features,
+            # n_train, n_test ...
+            "hyperparameters": setup["params"],
+            # ... sklearn_version, metrics ...
+        }
+        with open(METADATA_FILE, "w") as f:
+            json.dump(metadata, f, indent=4)
+
+        mlflow.log_artifact(METADATA_FILE)
+```
+
+- `mlflow_run_id` links the local file to the run in MLflow (and back).
+- `mlflow.log_artifact(file)` uploads the file and attaches it to the run. Remember: the local `models/…metadata.json` is **still overwritten** by every run — but each run now keeps *its own copy* in MLflow. That solves the "silent overwrite problem" from Exercise 3 of the lecture repo.
+
+Finally, the entry point accepts the setup name as a command-line argument:
+
+```python
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Train a wine quality model and track it with MLflow")
+    parser.add_argument("setup", choices=SETUPS.keys(), help="Name of the experiment setup to run")
+    args = parser.parse_args()
+    train_model(args.setup)
+```
+
+`argparse` reads what you type after the script name. `choices=SETUPS.keys()` rejects typos immediately and shows you the valid names.
+
+---
+
+### Step 6: Run your first experiment
+
+Make sure the three environment variables are set in your current terminal (Step 2), then:
+
+```
+uv run wine_quality_training.py rf_baseline
+```
+
+You should see the usual log lines plus `Started MLflow run 'rf_baseline' (…)` and the evaluation report. Your local files in `models/` are created as before.
+
+Now open the result:
+
+1. Go to your repository on DagsHub.
+2. Click the **Experiments** tab, then **"Go to MLflow UI"**.
+3. Open the `wine-quality` experiment — there is one run named `rf_baseline`.
+4. Click into it and look around:
+   - **Parameters** — all `RandomForestRegressor` settings (autolog) plus `feature_set` and `n_features` (yours).
+   - **Metrics** — `training_*` (autolog) and `test_*` (yours).
+   - **Artifacts** — the model (autolog) and `wine_quality_model.metadata.json` (yours).
+
+🤔 **Look at `training_r2_score` and `test_r2` of this run.** They are very different. What does that tell you? *(Hint: the model saw the training data while learning — see the exam review below.)*
+
+### Step 7: Run more experiments
+```bash
+uv run wine_quality_training.py rf_shallow
+uv run wine_quality_training.py rf_core_features
+uv run wine_quality_training.py gradient_boosting
+uv run wine_quality_training.py ridge
+```
+
+Each command creates **a new run** in the same experiment. Nothing is overwritten — you can always go back.
+
+> 💡 Running the *same* setup twice also creates two runs. With fixed `random_state` the results will be (almost) identical — that's reproducibility in action.
+
+## Step 8: Run more experiments
+
+```
+uv run wine_quality_training.py rf_shallow
+uv run wine_quality_training.py rf_core_features
+uv run wine_quality_training.py gradient_boosting
+uv run wine_quality_training.py ridge
+```
+
+Each command creates **a new run** in the same experiment. Nothing is overwritten — you can always go back.
+
+> 💡 Running the *same* setup twice also creates two runs. With fixed `random_state` the results will be (almost) identical — that's reproducibility in action.
+
+---
+
+### Step 8: Compare the runs in the MLflow UI
+
+1. Open the `wine-quality` experiment in the MLflow UI.
+2. **Tick the checkboxes** of all runs and click **Compare**.
+3. Use the **Columns** dropdown to show the interesting columns: `test_mae`, `test_rmse`, `test_r2`, `training_r2_score`, `n_features`, and the hyperparameters.
+4. Try **sorting** by `test_r2`, and use the comparison charts (parallel coordinates / scatter plot) to see how hyperparameters relate to the result.
+
+Answer these questions (write the answers down — they are great exam practice):
+
+- 🏆 Which setup has the best `test_r2` / lowest `test_mae`?
+- 🌲 Did reducing the features (`rf_core_features`) hurt much? What does that say about the other six features?
+- 📉 Which models have a large gap between `training_r2_score` and `test_r2`? (That is **overfitting**.) Which have a small gap?
+- ⚖️ Is the "best" model also the one you'd choose in practice? (Think: complexity, training time, explainability.)
+
+✅ If you see all your runs side by side with their metrics — **you're done with the task.**
+
+#### Let's do a final commit!
+With this commit, we are officially finished with everything in connection with the model training, so we'll also merge and close (delete) our branch now.
+~~~bash
+git add .
+git commit -m "Wrapped up everything! Several experiments ran"
+git switch main
+git merge feature/trainingscript
+git push origin main
+git branch -d feature/trainingscript
+~~~
+
+🎉 Wow, we came a long way from just importing the data!
+Now we have a complete model that we can run and use. Let's continue then with Phase 3.
