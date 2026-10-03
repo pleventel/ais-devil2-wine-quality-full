@@ -7,6 +7,7 @@ requires-python = ">=3.13" # as in the course always, we'll use Python 3.13
 dependencies = [
     "dvc>=3.67.1",
     "fastparquet>=2026.9.0",
+    "mlflow>=3.16.1",
     "pandas>=3.0.6",
     "pyarrow>=25.0.1",
     "scikit-learn>=1.9.1",
