@@ -109,7 +109,7 @@ Our data is now safely and decently stored with Data Version Control!
 > 
 > ✅ Running the script produces a model file and a metadata file.
 
-### 🛫 Before you start...
+### Step 0: 🛫 Before you start...
 #### 🔀 Switch to a feature branch
 As now we are starting developement after the initial setup, we are going to use a feature branch.
 ~~~bash
@@ -338,7 +338,7 @@ git add .
 git commit -m "Finished script for model training"
 ~~~
 
-### 🏁 Run it & look at the results
+### Step 10: 🏁 Run it & look at the results
 ```bash
 uv run wine_quality_training.py
 ```
@@ -378,7 +378,7 @@ Now we have a complete model that we can run and use. Let's continue then with P
 
 As you could see, the pickle files are overwritten every time you start a new run. This Phase is completely about how to keep these results and parameters of the different experiments.
 
-### Initializations...
+### Step 0: 🛫 Initializations...
 As in Phase 2, we'll now also work on a feature branch.
 ~~~bash
 git checkout -b feature/tracking
@@ -653,7 +653,7 @@ Your next task will be regarding model registry, so let's continue with Phase 4.
 > 
 > ✅ `.model-version` is committed to Git; `download_model.py` produces `wine_quality_model.pkl`.
 
-### Step 0: Just to get started
+### Step 0: 🛫 Just to get started
 As in previous phases, we'll now also work on a feature branch.
 ~~~bash
 git checkout -b feature/bestmodel
