@@ -656,3 +656,165 @@ git branch -d feature/tracking
 ~~~
 
 🎉 This section is also finished now! You learned how to run multiple experiments and track their results with MLflow.
+Your next task will be regarding model registry, so let's continue with Phase 4.
+
+
+## 🏆 Phase 4: Register the Best Model
+> - Pick your best run and register it in the MLflow Model Registry as wine-quality
+> - Create a `.model-version` file in the repository root containing the version number
+> - Create a `download_model.py` script that reads `.model-version` and downloads the registered model
+> 
+> ✅ `.model-version` is committed to Git; `download_model.py` produces `wine_quality_model.pkl`.
+
+### Step 0: Just to get started
+As in previous phases, we'll now also work on a feature branch.
+~~~bash
+git checkout -b feature/bestmodel
+~~~
+
+### Step 1: Register the best model
+Open the MLflow UI on [DagsHub](https://dagshub.com) (repository → **Experiments** → **Go to MLflow UI**), open the `wine-quality` experiment and show the columns `test_mae`, `test_rmse`, `test_r2` and `training_r2_score`.
+
+> 🤔 **How can we define what's best?**
+> 
+> | Criterion | When it makes sense |
+> |---|---|
+> | highest `test_r2` | you want the model that explains most of the variation in quality |
+> | lowest `test_mae` | you want the smallest *typical* error, easy to explain ("off by 0.5 points on average") |
+> | lowest `test_rmse` | big mistakes are especially bad for you |
+
+Two sanity checks before you pick the top run:
+
+- **Always use the `test_*` metrics**, never `training_*`. A model always looks better on data it has learned from.
+- **Look at the gap** between `training_r2_score` and `test_r2`. If two models are almost equally good on the test set, the one with the *smaller gap* generalises better — and a simpler model is easier to explain and maintain.
+
+We can choose any of the three criterions, but in this example **lowest `test_mae`** will be used. Based on this, in the specific example `rf_core_features` is the best model.
+
+### Step 2: Find the model of that run & Register it
+#### Finding the model
+Click on your chosen run. Remember what `mlflow.autolog()` did in Phase 3: it saved the trained model together with the run. Scroll down in the run page to the **Logged models** section (or look under **Artifacts** for a folder called `model`).
+
+Click on the model. You should see its details and a **"Register model"** button.
+
+#### Register the model
+1. Click **"Register model"**.
+2. Choose **"Create new model"** and enter the name **`wine-quality`**.
+3. Confirm.
+
+This promotes the model from "just another run" to a **versioned, named entry** in the registry. Every time you register a model under this name, the version number increments automatically — the first registration becomes version `1`.
+
+#### Version number
+Open the **Models** tab in the MLflow UI. You should see the registered model `wine-quality` with version `1`. Click on it and have a look at the details: the registry remembers **which run** the version came from (the "source run") &ndash; that is the traceability back to your parameters, metrics and metadata file.
+
+### Step 3: Create `.model-version`
+Create a file called `.model-version` in the **root of your repository** and put only the version number inside:
+
+```bash
+echo "1" > .model-version
+```
+
+### Step 4: Write `download_model.py`
+Create `download_model.py` in the root of your repository:
+```python
+import logging
+import os
+import pickle
+import sys
+
+import mlflow
+import mlflow.sklearn
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger(__name__)
+
+MODEL_NAME = "wine-quality"
+VERSION_FILE = ".model-version"
+OUTPUT_FILE = "wine_quality_model.pkl"
+REQUIRED_ENV_VARS = ["MLFLOW_TRACKING_URI", "MLFLOW_TRACKING_USERNAME", "MLFLOW_TRACKING_PASSWORD"]
+
+
+def check_env_vars() -> None:
+    missing = [var for var in REQUIRED_ENV_VARS if not os.environ.get(var)]
+    if missing:
+        logger.error(f"Missing required environment variables: {', '.join(missing)}")
+        sys.exit(1)
+
+
+def read_model_version(path: str) -> str:
+    if not os.path.exists(path):
+        logger.error(f"{path} not found. Create it in the repository root and put the model version in it, e.g. 1")
+        sys.exit(1)
+    with open(path) as f:
+        version = f.read().strip()
+    if not version.isdigit():
+        logger.error(f"{path} must contain a single version number, but contains: '{version}'")
+        sys.exit(1)
+    return version
+
+
+def download_model() -> None:
+    check_env_vars()
+    version = read_model_version(VERSION_FILE)
+    model_uri = f"models:/{MODEL_NAME}/{version}"
+
+    logger.info(f"Downloading model from registry: {model_uri}")
+    model = mlflow.sklearn.load_model(model_uri)
+
+    logger.info(f"Storing model to: {OUTPUT_FILE}")
+    with open(OUTPUT_FILE, "wb") as f:
+        pickle.dump(model, f)
+
+
+if __name__ == "__main__":
+    download_model()
+```
+
+What happens here, step by step:
+
+- **`check_env_vars()`** — the same fail-fast guard as in the training script. MLflow finds the registry through the same three environment variables you already use.
+- **`read_model_version()`** — opens `.model-version` and `strip()`s whitespace/newlines (so `1` and `1\n` both work). It stops with a clear message if the file is missing or doesn't contain a plain number — again *fail fast* instead of a confusing MLflow error later.
+- **The model URI** `models:/wine-quality/1` has three parts:
+  - **`models:/`** — tells MLflow to look in the **Model Registry** (not in the artifacts of a run),
+  - **`wine-quality`** — the registered model name from Step 2,
+  - **`1`** — the version number, read from `.model-version`.
+- **`mlflow.sklearn.load_model(model_uri)`** — downloads the model from the registry and loads it as a scikit-learn object (for the `ridge` setup that is a whole `Pipeline` with scaler *and* model).
+- **`pickle.dump(model, f)`** — saves it as a `.pkl` file with `"wb"` (write binary), exactly the format you created in Phase 2 — but now it comes **from the registry** instead of from a local training run.
+
+### Step 5: Run it and check the result
+```bash
+uv run download_model.py
+```
+
+You should see:
+```bash
+INFO Downloading model from registry: models:/wine-quality/1
+INFO Storing model to: wine_quality_model.pkl
+```
+
+✅ `wine_quality_model.pkl` now exists in the root of your repository.
+
+> 💡 Don't confuse the two files: `models/wine_quality_model.pkl` is what your **last local training run** left behind (and it gets overwritten by every run). `wine_quality_model.pkl` in the root is the **registered version you pinned** — that is the one that counts for deployment.
+
+### Step 6: Keep the model file out of Git
+
+A downloaded model is an *artifact*, not source code — it can be recreated at any time from the registry, so it doesn't belong in Git. Add these lines to your `.gitignore`:
+
+```
+wine_quality_model.pkl
+models/
+```
+
+✅ **Phase 4 is done.** The version decision is now part of your Git history: anyone who checks out this commit and runs `download_model.py` gets exactly the same model.
+
+#### ❗ Let's commit our changes!
+With this commit, we are officially finished with everything in connection with the model training, so we'll also merge and close (delete) our branch now.
+~~~bash
+git add .gitignore download_model.py .model-version
+git commit -m "Wrapped up everything! Best model is saved"
+git switch main
+git merge feature/tracking
+git push origin main
+git branch -d feature/tracking
+~~~
+
+🎉 This section is also finished, now we can download the best model easily for further use.
