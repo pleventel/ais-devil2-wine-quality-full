@@ -654,10 +654,9 @@ With this commit, we are officially finished with everything in connection with 
 git add .
 git commit -m "Wrapped up everything! Several experiments ran"
 git switch main
-git merge feature/trainingscript
+git merge feature/tracking
 git push origin main
-git branch -d feature/trainingscript
+git branch -d feature/tracking
 ~~~
 
-🎉 Wow, we came a long way from just importing the data!
-Now we have a complete model that we can run and use. Let's continue then with Phase 3.
+🎉 This section is also finished now! You learned how to run multiple experiments and track their results with MLflow.
