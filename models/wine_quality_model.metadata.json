@@ -1,0 +1,31 @@
+{
+    "model_type": "RandomForestRegressor",
+    "trained_at": "2026-10-03T16:48:27.238133+00:00",
+    "data_file": "data/winequality.parquet",
+    "target": "quality",
+    "features": [
+        "fixed_acidity",
+        "volatile_acidity",
+        "citric_acid",
+        "residual_sugar",
+        "chlorides",
+        "free_sulfur_dioxide",
+        "total_sulfur_dioxide",
+        "density",
+        "pH",
+        "sulphates",
+        "alcohol"
+    ],
+    "n_train": 5197,
+    "n_test": 1300,
+    "hyperparameters": {
+        "n_estimators": 200,
+        "random_state": 42
+    },
+    "sklearn_version": "1.9.1",
+    "metrics": {
+        "mae": 0.43663846153846153,
+        "rmse": 0.6086317883960333,
+        "r2": 0.4984303213411273
+    }
+}
