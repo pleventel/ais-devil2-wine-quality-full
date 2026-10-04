@@ -805,3 +805,404 @@ git branch -d feature/tracking
 ~~~
 
 🎉 This section is also finished, now we can download the best model easily for further use.
+
+
+## 🌐 Phase 5: Serve Predictions with FastAPI
+> Create `wine_quality_api.py` that:
+> 
+> - Loads `wine_quality_model.pkl` at startup
+> - Exposes a `POST /predict` endpoint accepting wine properties as JSON
+> - Return the predicted quality score
+> 
+> Use Pydantic to define your input and output. Only include the features you trained on.
+> 
+> Package the API as a Docker image using the multi-stage pattern.
+> 
+> ✅ The API runs locally and predictions work via the auto generated FastAPI UI. The Docker image builds successfully.
+
+Until now, our model lives in a `.pkl` file – only a Python script with the right libraries can use it. In this phase we put a **web API** in front of it, so that *anything* that can send an HTTP request (a website, a mobile app, `curl`, a colleague's script) can ask for a prediction. Then we package the whole thing into a **Docker image**, so it runs the same way on every machine.
+
+### Step 0: 🛫 Before you start...
+#### 🔀 Get to a feature branch
+First, make sure that we are working on a feature branch.
+```bash
+git checkout -b feature/api
+```
+
+#### Get the model file
+The API needs `wine_quality_model.pkl` in the **root** of the repository. This is the file that `download_model.py` created in Phase 4. If it is missing (e.g. fresh clone), download it again (the three `MLFLOW_*` environment variables from Phase 3 must be set in your terminal):
+```bash
+uv run download_model.py
+```
+
+#### 🔍 Check which features your model expects
+The assignment says: *"Only include the features you trained on."* Don't guess – **ask the model**. A scikit-learn model that was trained on a `DataFrame` remembers its column names:
+```bash
+uv run python -c "import pickle; print(pickle.load(open('wine_quality_model.pkl', 'rb')).feature_names_in_)"
+```
+
+For the registered `rf_core_features` model you should see only the core 5 features.
+
+> ⚠️ If you registered a different model in Phase 4 (e.g. `rf_baseline`, which uses all 11 features), use **the list you see here** in all following steps. The API must offer **exactly** the features of the registered model – not more, not fewer.
+
+#### Install the two libraries we need
+```bash
+uv add fastapi uvicorn
+```
+
+- **`fastapi`** – the web framework: it defines the routes (`/predict`), reads and validates the request, and generates the interactive documentation for us. **Pydantic** is installed together with it automatically (FastAPI is built on top of it).
+- **`uvicorn`** – the web *server*. FastAPI alone cannot listen on a port – uvicorn opens the port, speaks HTTP and hands every request over to our FastAPI app.
+
+### Step 1: Create the file and the imports
+Create `wine_quality_api.py` in the root of your project and start with the imports:
+
+```python
+import logging
+import os
+import pickle
+from contextlib import asynccontextmanager
+
+import pandas as pd
+from fastapi import FastAPI
+from pydantic import BaseModel, ConfigDict, Field
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger(__name__)
+```
+
+What is new here?
+- **`asynccontextmanager`** – needed for the *lifespan* function in Step 3 (code that runs at startup and shutdown).
+- **`FastAPI`** – the application object.
+- **`BaseModel`, `Field`, `ConfigDict`** – Pydantic building blocks to describe the structure of our JSON.
+
+### Step 2: Define the configuration as constants
+```python
+MODEL_FILE = "wine_quality_model.pkl"
+
+# Same features, same order as CORE_FEATURES in wine_quality_training.py
+FEATURES = ["alcohol", "volatile_acidity", "sulphates", "total_sulfur_dioxide", "chlorides"]
+```
+
+**Why an explicit `FEATURES` list again?** <br> It is the "contract" of the model – the same one we wrote down in the training script (Phase 2/3). The API must hand the model **exactly these columns in exactly this order**. We use the list in Step 5 to build the input table.
+
+### Step 3: Load the model once at startup
+```python
+ml_models = {}
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    if not os.path.exists(MODEL_FILE):
+        raise RuntimeError(f"{MODEL_FILE} not found. Run 'uv run download_model.py' first.")
+    logger.info(f"Loading model from {MODEL_FILE}")
+    with open(MODEL_FILE, "rb") as f:
+        ml_models["wine_quality"] = pickle.load(f)
+    logger.info("Model loaded")
+    yield
+    ml_models.clear()
+```
+
+What happens here, step by step:
+- **`ml_models = {}`** – an (at first empty) dictionary at module level. It is the "shelf" where the loaded model lives while the API is running.
+- **`lifespan`** – FastAPI runs everything **before the `yield`** once **when the server starts**, and everything **after the `yield`** once **when it shuts down**. That is exactly "load at startup".
+- **The guard (`if not os.path.exists(...)`)** – the *fail fast* principle again: without a model file the server refuses to start and tells you what to do, instead of starting fine and crashing on the first request.
+- **`"rb"`** = *read binary*, the counterpart of `"wb"` from Phase 2.
+- **`ml_models.clear()`** – cleanup on shutdown.
+
+🤔 **Why not simply load the model inside the `/predict` function?** <br>
+Loading a forest with 200 trees from disk takes a moment. If we did it on every request, every single prediction would be slow. Loading **once at startup** and reusing the object makes each prediction a matter of milliseconds.
+
+> ⚠️ **Security note:** `pickle.load` can execute arbitrary code that is hidden in a file. Only ever load pickle files you created yourself or fully trust – ours comes from *our own* model registry.
+
+### Step 4: Define input and output with Pydantic
+```python
+class WineFeatures(BaseModel):
+    alcohol: float = Field(ge=0, description="Alcohol content in % vol")
+    volatile_acidity: float = Field(ge=0, description="Acetic acid in g/dm3")
+    sulphates: float = Field(ge=0, description="Potassium sulphate in g/dm3")
+    total_sulfur_dioxide: float = Field(ge=0, description="Total SO2 in mg/dm3")
+    chlorides: float = Field(ge=0, description="Sodium chloride in g/dm3")
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "examples": [
+                {
+                    "alcohol": 10.5,
+                    "volatile_acidity": 0.35,
+                    "sulphates": 0.55,
+                    "total_sulfur_dioxide": 115.0,
+                    "chlorides": 0.05,
+                }
+            ]
+        },
+    )
+
+
+class PredictionResponse(BaseModel):
+    quality: float = Field(description="Predicted wine quality score")
+```
+
+What happens here:
+
+- **A Pydantic model = a class that describes the shape of a JSON object.** Each attribute is a field with a type. `WineFeatures` is our **input**, `PredictionResponse` is our **output**.
+- **Only 5 fields** – only the features the model was trained on. We don't ask the caller for `density`, `pH`, ... because the model could not use them anyway.
+- **`Field(ge=0, ...)`** – `ge` = *greater or equal*. Negative alcohol content makes no sense, so it is rejected. `description` shows up in the documentation.
+- **No default value** → the field is **required**. A request without `alcohol` is rejected.
+- **`extra="forbid"`** – unknown fields (e.g. `"density": 0.99`) are rejected instead of being silently ignored. This enforces the "contract" strictly. (By default Pydantic would just ignore them.)
+- **`json_schema_extra` / `examples`** – only cosmetic: the Swagger UI (Step 6) will pre-fill the request body with this example, so you can click "Execute" right away.
+
+💡 **What does Pydantic do for us?** FastAPI hands every incoming JSON through the Pydantic model **before** our function runs: it (1) checks that all fields exist, (2) checks the types and constraints (and converts where reasonable, e.g. `"10.5"` → `10.5`), and (3) answers with an automatic **`422 Unprocessable Entity`** and a precise error message if something is wrong. Our function only ever sees clean data – we don't write a single `if` for this.
+
+#### ❗ Don't forget to commit your changes!
+```bash
+git add wine_quality_api.py pyproject.toml uv.lock
+git commit -m "Added model loading and input/output schemas for the API"
+```
+
+### Step 5: Create the app and the `/predict` endpoint
+```python
+app = FastAPI(title="Wine Quality API", version="0.1.0", lifespan=lifespan)
+
+
+@app.post("/predict", response_model=PredictionResponse)
+def predict(wine: WineFeatures) -> PredictionResponse:
+    X = pd.DataFrame([wine.model_dump()], columns=FEATURES)
+    prediction = ml_models["wine_quality"].predict(X)[0]
+    return PredictionResponse(quality=round(float(prediction), 2))
+```
+
+What happens here, line by line:
+
+- **`app = FastAPI(..., lifespan=lifespan)`** – creates the application and plugs in our startup/shutdown function from Step 3. `title` and `version` appear in the generated docs.
+- **`@app.post("/predict")`** – a *decorator* that registers the function below as the handler for **`POST /predict`**. (POST, because the caller *sends* data to us.)
+- **`wine: WineFeatures`** – this single parameter is the magic: FastAPI sees the type, reads the JSON body, validates it with Pydantic (Step 4) and passes us a ready `WineFeatures` object.
+- **`wine.model_dump()`** – turns the validated object into a plain dictionary.
+
+🤔 **Why `def` and not `async def`?** <br> `model.predict` is CPU-bound, blocking code. FastAPI runs normal `def` endpoints in a **thread pool**, so a prediction doesn't block the server from handling other requests. With `async def` it *would* block the event loop.
+
+### Step 6: Run the API locally
+```bash
+uv run uvicorn wine_quality_api:app --reload
+```
+
+What the command means:
+
+- **`wine_quality_api:app`** – `<python file without .py>:<variable name of the FastAPI object>`. uvicorn imports `wine_quality_api.py` and looks for the variable `app`.
+- **`--reload`** – restarts the server automatically when you save the file. Great for development, **not** for production.
+
+You should see something like:
+```
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+... INFO Loading model from wine_quality_model.pkl
+... INFO Model loaded
+INFO:     Application startup complete.
+```
+
+#### Try it in the auto-generated UI
+1. Open **[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)** in your browser. This is the **Swagger UI** – FastAPI generated it from our code (routes, Pydantic models, descriptions).
+2. Click **`POST /predict`** → **"Try it out"**. The request body is already filled with our example.
+3. Click **"Execute"**. Under *Server response* you should see `200` and a body like:
+   ```json
+   { "quality": 5.97 }
+   ```
+   (The exact number depends on your model.)
+
+#### Break it on purpose 🔨
+Now let's see the Pydantic validation in action. Change the body in the UI and click **Execute** again:
+
+| What you send | Result |
+|---|---|
+| remove the `alcohol` line | `422` – `"Field required"` |
+| `"alcohol": "strong"` | `422` – value is not a valid number |
+| `"alcohol": -1` | `422` – must be greater than or equal to 0 |
+| add `"density": 0.99` | `422` – extra inputs are not permitted |
+
+A `422` body looks like this (shortened):
+```json
+{ "detail": [ { "type": "missing", "loc": ["body", "alcohol"], "msg": "Field required" } ] }
+```
+`loc` tells you exactly *where* the problem is. **We didn't write any of this error handling** – Pydantic and FastAPI did.
+
+#### The same thing with `curl`
+In a second terminal:
+```bash
+curl -X POST http://127.0.0.1:8000/predict \
+  -H "Content-Type: application/json" \
+  -d '{"alcohol": 10.5, "volatile_acidity": 0.35, "sulphates": 0.55, "total_sulfur_dioxide": 115.0, "chlorides": 0.05}'
+```
+
+💡 **More things FastAPI generated for free:** [http://127.0.0.1:8000/redoc](http://127.0.0.1:8000/redoc) (alternative documentation) and [http://127.0.0.1:8000/openapi.json](http://127.0.0.1:8000/openapi.json) (the machine-readable **OpenAPI** description that both UIs are built from).
+
+Stop the server with `Ctrl+C`.
+
+✅ **The first half of the task is done:** the API runs locally and predictions work via the UI.
+
+#### ❗ Don't forget to commit your changes!
+```bash
+git add wine_quality_api.py
+git commit -m "Added predict endpoint to the wine quality API"
+```
+
+### Step 7: Package the API as a Docker image (multi-stage)
+Now we apply what we learned about Docker: a **multi-stage build** – one stage to **build** (install the dependencies), one **clean** stage to **run**.
+
+#### 7.1 Create the `.dockerignore`
+Docker sends the whole folder (the *build context*) to the Docker engine when you build. We don't want the virtual environment, the Git history or the DVC data in there. Create `.dockerignore` in the root:
+
+```
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# Git & DVC (.dvc/config.local contains your DagsHub token!)
+.git/
+.gitignore
+.github/
+.dvc/
+.dvcignore
+data/
+
+# ML artifacts we don't need in the API image
+models/
+mlruns/
+notebooks/
+
+# Scripts and docs that are not needed to serve predictions
+wine_quality_training.py
+download_model.py
+ACTIONS.md
+README.md
+
+# IDE & OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Docker
+.dockerignore
+Dockerfile*
+```
+
+- 🔒 **Security:** In Phase 1 you stored your DagsHub token in `.dvc/config.local`. That file is ignored by *Git*, but Docker doesn't know that – without `.dockerignore` the token could end up inside the image.
+- ⚡ **Speed:** `.venv/` and `data/` can be huge; excluding them makes the build context small.
+- ⚠️ Do **not** ignore `wine_quality_model.pkl`, `wine_quality_api.py`, `pyproject.toml` or `uv.lock` – we need them!
+
+
+#### 7.2 Write the `Dockerfile`
+Create a file named `Dockerfile` (no extension) in the root. We build it piece by piece.
+
+**Build argument**
+```dockerfile
+ARG PYTHON_VERSION=3.13
+```
+A variable for the Python version, so we change it in one place. It must match `requires-python` in `pyproject.toml` (`>=3.13`).
+
+**The builder stage**
+```dockerfile
+# Builder stage: install dependencies
+FROM python:${PYTHON_VERSION}-slim AS builder
+
+WORKDIR /app
+
+# Never let uv download its own Python, always use the one of the image
+ENV UV_PYTHON_DOWNLOADS=never
+
+# Install curl and uv
+RUN apt-get update && apt-get install -y curl
+RUN curl -Ls https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+# Copy only the files that define the dependencies (-> layer caching)
+COPY pyproject.toml uv.lock ./
+
+# Install exactly the locked versions into /app/.venv
+RUN uv sync --frozen --no-dev
+```
+
+- **`AS builder`** – names the stage, so we can copy from it later. `-slim` means it's stripped down to save space. It's like buying an unfurnished apartment.
+- **`ENV UV_PYTHON_DOWNLOADS=never`** – the virtual environment (`.venv`) contains a *link* to the Python it was created with. If `uv` downloaded its own Python into the builder, that link would point to a place that **doesn't exist in the runtime stage** and the container would crash. With `never`, uv must use the Python of the base image (and stops with an error if there is none that fits).
+- **`curl` + `uv` install** – exactly as in the lecture. We need `curl` only to download `uv`; it stays in the builder and **never reaches the final image**.
+- **`COPY pyproject.toml uv.lock ./`** – only the dependency files, not the code. Docker caches each instruction as a **layer**: as long as these two files don't change, Docker re-uses the (slow) dependency layer when you only edit `wine_quality_api.py`.
+- **`uv sync --frozen --no-dev`** – installs exactly the versions from `uv.lock` (`--frozen` = don't re-resolve) and skips development-only packages. 🔑 **This matters for our model:** the pickle was created with the scikit-learn version from your lock file. The image installs the very same version, so loading the model works. (A different scikit-learn version can break or warn when unpickling.)
+
+> ❗ `uv.lock` must be committed to Git and exist locally – otherwise `--frozen` fails.
+
+**The runtime stage**
+```dockerfile
+# Runtime stage: clean image with only what we need to run the API
+FROM python:${PYTHON_VERSION}-slim
+
+WORKDIR /app
+
+# Take the installed environment from the builder
+COPY --from=builder /app/.venv /app/.venv
+
+# Take only the code and the model
+COPY wine_quality_api.py wine_quality_model.pkl ./
+
+EXPOSE 8000
+
+ENTRYPOINT ["/app/.venv/bin/uvicorn"]
+CMD ["wine_quality_api:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+- **`FROM ...` (second time)** – starts a **brand-new image**. Everything from the builder (curl, uv, caches) is left behind.
+- **`COPY --from=builder /app/.venv /app/.venv`** – the magic line: only the finished environment moves over. It has to land at the **same path (`/app/.venv`)** because the scripts inside it (like `uvicorn`) contain the absolute path of the Python they belong to. Same `WORKDIR` + same Python base image in both stages = it works.
+- **`COPY wine_quality_api.py wine_quality_model.pkl ./`** – we are selective: the API code and the model. No training script, no data, no Git history.
+- **`EXPOSE 8000`** – *documentation only*: "this container listens on port 8000". It does **not** open the port – that is `-p` at `docker run`.
+- **`ENTRYPOINT` + `CMD`** – as in the `hello-world` example: `ENTRYPOINT` is the program (`uvicorn`), `CMD` are its default arguments (which could be overwritten at `docker run`).
+- 🔑 **`--host 0.0.0.0`** – by default uvicorn listens on `127.0.0.1` (*localhost*). Inside a container that means "reachable only from inside this very container" – port mapping couldn't reach it. `0.0.0.0` means "listen on all network interfaces".
+
+🤔 **Why is the model copied *into* the image?** <br> The image becomes **self-contained and immutable**: image + tag = exactly one model version, and it runs anywhere without access to the registry or credentials. The price: to ship a new model you rebuild the image. Because the model comes from `download_model.py`, a CI pipeline would have to run that script *before* `docker build`.
+
+#### 7.3 Build and run
+```bash
+docker build -t wine-quality-api .
+```
+The `-t` tag names the image as `wine-quality-api`, the `.` is the build context (the current folder).
+
+If you see `COPY failed: file not found ... wine_quality_model.pkl`, run `uv run download_model.py` first (Step 0).
+
+You may also get `ERROR: permission denied ...`, check whether docker is active with `sudo systemctl status docker`.
+
+Now start a container (make sure your local `uvicorn` from Step 6 is stopped, otherwise port 8000 is taken):
+```bash
+docker run --rm -p 8000:8000 wine-quality-api
+```
+
+- **`--rm`** – remove the container when it stops (lecture best practice).
+- **`-p 8000:8000`** – `<port on your machine>:<port in the container>`. Port 8000 on your laptop is forwarded to port 8000 in the container. (Port busy? Use `-p 8080:8000` and open `localhost:8080`.)
+
+Open **[http://localhost:8000/docs](http://localhost:8000/docs)** and run the same prediction as in Step 6 – this time it is answered **by the container**. 🎉 Stop it with `Ctrl+C`.
+
+#### 7.4 Inspect the result
+How lean is our image, and is it really clean?
+```bash
+docker images wine-quality-api
+docker run -it --rm --entrypoint sh wine-quality-api
+```
+Inside the container:
+```bash
+ls -la
+which curl
+exit
+```
+You should see only `.venv`, `wine_quality_api.py` and `wine_quality_model.pkl` – and `which curl` finds **nothing**. The build tools stayed in the builder stage. That is the point of a multi-stage build: smaller image, smaller attack surface, only runtime content.
+
+✅ **The second half is done:** the Docker image builds and the API works inside the container.
+
+#### ❗ Let's commit and wrap up the phase!
+```bash
+git add wine_quality_api.py Dockerfile .dockerignore pyproject.toml uv.lock
+git commit -m "Wrapped up everything! API served in a multi-stage Docker image"
+git switch main
+git merge feature/api
+git push origin main
+git branch -d feature/api
+```
+
+🎉 This section is finished! Our model is now a real service: validated input, one-time model loading, auto-generated documentation – and packaged so that it runs anywhere Docker runs.
