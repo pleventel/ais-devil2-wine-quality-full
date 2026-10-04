@@ -26,3 +26,10 @@ dev = [
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+
+# Cannot update diskcache and we need it.
+[tool.uv-secure]
+ignore-vulns = [
+    "GHSA-w8v5-vhqr-4h9v",
+    "PYSEC-2026-2447",
+]
