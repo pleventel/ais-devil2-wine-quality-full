@@ -1,0 +1,13 @@
+# Run the wine quality API locally with ONE command:  docker compose up --build
+services:
+  wine-quality-api:
+    build: . # build the image from ./Dockerfile (like `docker build .`)
+    image: wine-quality-api # name of the built image (like `-t wine-quality-api`)
+    ports:
+      - "8000:8000" # <port on your machine>:<port in the container> (like `-p`)
+    healthcheck: # Docker regularly asks the container: "are you OK?"
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8000/docs\")' || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
