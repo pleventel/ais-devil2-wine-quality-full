@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# Git & DVC (.dvc/config.local contains your DagsHub token!)
+.git/
+.gitignore
+.github/
+.dvc/
+.dvcignore
+data/
+
+# ML artifacts we don't need in the API image
+models/
+mlruns/
+notebooks/
+
+# Scripts and docs that are not needed to serve predictions
+wine_quality_training.py
+download_model.py
+ACTIONS.md
+README.md
+
+# IDE & OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Docker
+.dockerignore
+Dockerfile*
