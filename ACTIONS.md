@@ -2007,3 +2007,169 @@ git push origin main
 
 🎉 This section is also officially finished!
 
+
+## ⚙️ Phase 7: Infrastructure as Code
+> Use Docker Compose to allow running the API locally with a single command.
+
+After Phase 5 and 6 we can run the API in a container. But look at what *you* have to know to do it:
+
+```
+uv run download_model.py
+docker build -t wine-quality-api .
+docker run --rm -p 8000:8000 wine-quality-api
+```
+
+The image name, the port mapping, the `--rm` flag — all of this lives in your head or in a README.
+
+**Infrastructure as Code (IaC)** means: we *describe* the infrastructure we need (here: containers, ports, networks) in a **file that lives in Git**, instead of clicking or typing it by hand. That gives us the same benefits as for code:
+
+- **Declarative** – we say *what* we want, Docker Compose figures out *how*.
+- **Reproducible** – the same file gives the same setup on every machine.
+- **Reviewable** – changes go through pull requests like any other change.
+- **Shareable** – a colleague clones the repo and runs one command.
+
+**Docker Compose** is IaC for a group of containers on one machine. In this phase the file contains only **one** service (the API). In Phase 8 the very same file will grow to three.
+
+### Step 0: 🛫 Before you start...
+
+#### 🔀 Get to a feature branch
+
+`main` is protected since Phase 6, so everything from now on goes through a feature branch and a pull request.
+
+```bash
+git checkout -b feature/compose
+```
+
+#### Free port 8000
+
+Compose will publish port 8000 on your machine. Stop the `uvicorn` server from earlier (`Ctrl+C`) and check that no old container is still running:
+
+```bash
+docker ps
+``` 
+
+### Step 1: From `docker run` to `docker-compose.yml`
+Every option of the commands above has a place in the Compose file:
+
+| What you typed                       | Where it goes in `docker-compose.yml`                      |
+| ------------------------------------ | ---------------------------------------------------------- |
+| `docker build .` (build context `.`) | `build: .`                                                 |
+| `-t wine-quality-api`                | `image: wine-quality-api`                                  |
+| `-p 8000:8000`                       | `ports: - "8000:8000"`                                     |
+| `--rm`                               | not needed – `docker compose down` removes the containers  |
+| `ENTRYPOINT` / `CMD` of the image    | stay in the `Dockerfile` (we don't repeat them)            |
+| (new) "is the container OK?"         | `healthcheck:`                                             |
+
+### Step 2: Create `docker-compose.yml`
+📍 **Where:** in the root of the repository, next to the `Dockerfile`.
+
+```yaml
+# Run the wine quality API locally with ONE command:  docker compose up --build
+services:
+  wine-quality-api:
+    build: . # build the image from ./Dockerfile (like `docker build .`)
+    image: wine-quality-api # name of the built image (like `-t wine-quality-api`)
+    ports:
+      - "8000:8000" # <port on your machine>:<port in the container> (like `-p`)
+    healthcheck: # Docker regularly asks the container: "are you OK?"
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8000/docs\")' || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+```
+
+🔍 **What each part means:**
+
+- **`services:`** – the list of containers that belong to our application.
+- **`wine-quality-api:`** – the name of the service. You choose it. It is also the **hostname** of the container inside the network that Compose creates – this will be important in Phase 8.
+- **`build: .`** – "build the image from the `Dockerfile` in this folder". Same as `docker build .`, so your multi-stage build from Phase 5 is used.
+- **`image: wine-quality-api`** – the name of the resulting image (like `-t`). We keep the name from Phase 5.
+- **`ports: "8000:8000"`** – `<port on your machine>:<port in the container>`. Quote it in YAML, otherwise it can be misread as a number.
+- **`healthcheck`** – Docker runs the `test` command **inside** the container every `interval`. Exit code `0` = healthy, otherwise it counts as a failure; after `retries` failures in a row the container is `unhealthy`. `start_period` is a grace time in which failures don't count yet – our API needs a moment to load the model.
+
+🤔 **Why does the health check use Python?**  
+Our runtime image has no `curl` or `wget` – we deliberately left them in the builder stage (that was the point of the multi-stage build!). Python is already in the image, and `urllib` is part of its standard library, so we need nothing extra. (Same trick as in the Docker lecture.)
+
+🤔 **Why does `/docs` work as a health probe?**  
+`uvicorn` opens the port only **after** the startup code (our `lifespan` function) has finished. If the model file were missing, the app would crash before listening. So *"`/docs` answers"* also means *"the model is loaded"*.
+
+> ⚠️ **File name:** the assignment asks for `docker-compose.yml`. The Docker lecture used `compose.yaml`. Docker Compose understands both, but if **both** files exist it silently prefers `compose.yaml`. Keep only one!
+
+#### ❗ Don't forget to commit your changes!
+```bash
+git add docker-compose.yml
+git commit -m "Added docker-compose.yml to run the API with one command"
+git push -u origin feature/compose
+```
+
+
+### Step 3: Run everything with one command
+
+```bash
+docker compose up --build
+```
+
+🔍 **What happens, in this order:**
+
+1. Compose reads `docker-compose.yml` in the current folder. The folder name becomes the **project name**.
+2. `--build`: Docker builds the image from the `Dockerfile` (builder stage → runtime stage, exactly as in Phase 5) and tags it `wine-quality-api`.
+3. Compose creates a **network** named `<project>_default`.
+4. It creates and starts a **container** named like `<project>-wine-quality-api-1` and publishes port 8000.
+5. Docker starts running the health check. The status goes `starting` → `healthy`.
+6. The logs of the container stream into your terminal.
+
+Now open <http://localhost:8000/docs> and run a prediction exactly like in Phase 5 – this time **Compose** started the container. 🎉
+
+Stop it with `Ctrl+C`. Now try the background mode and look around:
+
+```bash
+docker compose up -d
+docker compose ps
+docker compose logs -f
+```
+
+`docker compose ps` should show the service as `(healthy)` after a few seconds. Leave the logs with `Ctrl+C` (the container keeps running) and clean up:
+
+```bash
+docker compose down
+```
+
+`down` stops **and removes** the containers and the network. Nothing is left behind – this is why we don't need `--rm`.
+
+> ⚠️ **`--build` matters!** `docker compose up` only builds an image if **no image with that name exists yet**. Because we set `image: wine-quality-api` and you built exactly that name in Phase 5, Compose would happily reuse the old image – **without your code changes**. Rule of thumb: after changing code, `Dockerfile` or dependencies, always run `docker compose up --build`.
+
+### Step 4: The Docker Compose commands you need
+
+| Command                             | What it does                                                    |
+| ----------------------------------- | --------------------------------------------------------------- |
+| `docker compose up`                 | Start all services (shows the logs)                             |
+| `docker compose up --build`         | Rebuild images first, then start                                |
+| `docker compose up -d`              | Start in the background (detached)                              |
+| `docker compose ps`                 | List the services and their status (incl. health)               |
+| `docker compose logs -f <service>`  | Follow the logs of one service                                  |
+| `docker compose restart <service>`  | Restart one service (e.g. after changing a mounted config file) |
+| `docker compose exec <service> sh`  | Open a shell in a running service                               |
+| `docker compose down`               | Stop and remove containers + network                            |
+
+#### Wrapping up the branch
+Most probably, you have nothing to commit, but check it with `git staus` first.
+
+Now open a pull request `feature/compose → main` on GitHub, wait for the checks and merge it (same flow as at the end of Phase 6).
+
+> ⚠️ **If the pull request can't be merged ("Expected — Waiting for status to be reported"):**  
+> In Phase 6 `training.yml` got a `paths:` filter for pull requests, so it does **not** run when only `docker-compose.yml` changes. If you made **Train and Track** a *required* check in the ruleset, GitHub waits for a check that will never come – a skipped workflow leaves its required checks pending. Two ways out:
+> 1. **Recommended:** remove `Train and Track` from the *required* checks (Settings → Rules → Rulesets → your ruleset). `Lint and Test`, `Security Checks` and `Build and Push GHCR` (from `api.yml`, which runs on every pull request) still protect `main`.
+> 2. Add `docker-compose.yml` to the `paths:` list of `training.yml` – but then every compose change retrains the model, which is wasteful.
+
+After the merge:
+
+```bash
+git switch main
+git pull
+git branch -d feature/compose
+```
+
+✅ **Phase 7 is done:** `docker compose up --build` starts the API on a fresh machine – one command, no manual `docker build` / `docker run`.
+
+
