@@ -12,7 +12,11 @@ logger = logging.getLogger(__name__)
 MODEL_NAME = "wine-quality"
 VERSION_FILE = ".model-version"
 OUTPUT_FILE = "wine_quality_model.pkl"
-REQUIRED_ENV_VARS = ["MLFLOW_TRACKING_URI", "MLFLOW_TRACKING_USERNAME", "MLFLOW_TRACKING_PASSWORD"]
+REQUIRED_ENV_VARS = [
+    "MLFLOW_TRACKING_URI",
+    "MLFLOW_TRACKING_USERNAME",
+    "MLFLOW_TRACKING_PASSWORD",
+]
 
 
 def check_env_vars() -> None:
@@ -24,12 +28,16 @@ def check_env_vars() -> None:
 
 def read_model_version(path: str) -> str:
     if not os.path.exists(path):
-        logger.error(f"{path} not found. Create it in the repository root and put the model version in it, e.g. 1")
+        logger.error(
+            f"{path} not found. Create it in the repository root and put the model version in it, e.g. 1"
+        )
         sys.exit(1)
     with open(path) as f:
         version = f.read().strip()
     if not version.isdigit():
-        logger.error(f"{path} must contain a single version number, but contains: '{version}'")
+        logger.error(
+            f"{path} must contain a single version number, but contains: '{version}'"
+        )
         sys.exit(1)
     return version
 

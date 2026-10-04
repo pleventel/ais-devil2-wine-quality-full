@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import pickle
@@ -13,7 +14,13 @@ logger = logging.getLogger(__name__)
 MODEL_FILE = "wine_quality_model.pkl"
 
 # Same features, same order as CORE_FEATURES in wine_quality_training.py
-FEATURES = ["alcohol", "volatile_acidity", "sulphates", "total_sulfur_dioxide", "chlorides"]
+FEATURES = [
+    "alcohol",
+    "volatile_acidity",
+    "sulphates",
+    "total_sulfur_dioxide",
+    "chlorides",
+]
 
 ml_models = {}
 
@@ -21,13 +28,20 @@ ml_models = {}
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if not os.path.exists(MODEL_FILE):
-        raise RuntimeError(f"{MODEL_FILE} not found. Run 'uv run download_model.py' first.")
+        raise RuntimeError(
+            f"{MODEL_FILE} not found. Run 'uv run download_model.py' first."
+        )
     logger.info(f"Loading model from {MODEL_FILE}")
-    with open(MODEL_FILE, "rb") as f:
-        ml_models["wine_quality"] = pickle.load(f)
+
+    def _load_pickle():
+        with open(MODEL_FILE, "rb") as f:
+            return pickle.load(f)
+
+    ml_models["wine_quality"] = await asyncio.to_thread(_load_pickle)
     logger.info("Model loaded")
     yield
     ml_models.clear()
+
 
 class WineFeatures(BaseModel):
     alcohol: float = Field(ge=0, description="Alcohol content in % vol")
@@ -54,6 +68,7 @@ class WineFeatures(BaseModel):
 
 class PredictionResponse(BaseModel):
     quality: float = Field(description="Predicted wine quality score")
+
 
 app = FastAPI(title="Wine Quality API", version="0.1.0", lifespan=lifespan)
 

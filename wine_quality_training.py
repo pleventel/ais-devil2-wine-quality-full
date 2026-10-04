@@ -1,20 +1,20 @@
+import argparse
 import json
 import logging
 import os
 import pickle
-from datetime import datetime, timezone
-import argparse
 import sys
+from datetime import UTC, datetime
 
+import mlflow
 import pandas as pd
 import sklearn
-import mlflow
 from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 from sklearn.linear_model import Ridge
-from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -25,30 +25,60 @@ METADATA_FILE = "models/wine_quality_model.metadata.json"
 
 TARGET = "quality"
 ALL_FEATURES = [
-    "fixed_acidity", "volatile_acidity", "citric_acid", "residual_sugar", "chlorides",
-    "free_sulfur_dioxide", "total_sulfur_dioxide", "density", "pH", "sulphates", "alcohol",
+    "fixed_acidity",
+    "volatile_acidity",
+    "citric_acid",
+    "residual_sugar",
+    "chlorides",
+    "free_sulfur_dioxide",
+    "total_sulfur_dioxide",
+    "density",
+    "pH",
+    "sulphates",
+    "alcohol",
 ]
-CORE_FEATURES = ["alcohol", "volatile_acidity", "sulphates", "total_sulfur_dioxide", "chlorides"]
+CORE_FEATURES = [
+    "alcohol",
+    "volatile_acidity",
+    "sulphates",
+    "total_sulfur_dioxide",
+    "chlorides",
+]
 
 
 RANDOM_STATE = 42
 TEST_SIZE = 0.2
 
 EXPERIMENT_NAME = "wine-quality"
-REQUIRED_ENV_VARS = ["MLFLOW_TRACKING_URI", "MLFLOW_TRACKING_USERNAME", "MLFLOW_TRACKING_PASSWORD"]
+REQUIRED_ENV_VARS = [
+    "MLFLOW_TRACKING_URI",
+    "MLFLOW_TRACKING_USERNAME",
+    "MLFLOW_TRACKING_PASSWORD",
+]
 
 # One entry = one experiment setup. The name becomes the MLflow run name.
 SETUPS = {
-    "rf_baseline": {"model": "random_forest", "features": ALL_FEATURES,
-                    "params": {"n_estimators": 200}},
-    "rf_shallow": {"model": "random_forest", "features": ALL_FEATURES,
-                   "params": {"n_estimators": 50, "max_depth": 5}},
-    "rf_core_features": {"model": "random_forest", "features": CORE_FEATURES,
-                         "params": {"n_estimators": 200}},
-    "gradient_boosting": {"model": "gradient_boosting", "features": ALL_FEATURES,
-                          "params": {"n_estimators": 200, "learning_rate": 0.05, "max_depth": 3}},
-    "ridge": {"model": "ridge", "features": ALL_FEATURES,
-              "params": {"alpha": 1.0}},
+    "rf_baseline": {
+        "model": "random_forest",
+        "features": ALL_FEATURES,
+        "params": {"n_estimators": 200},
+    },
+    "rf_shallow": {
+        "model": "random_forest",
+        "features": ALL_FEATURES,
+        "params": {"n_estimators": 50, "max_depth": 5},
+    },
+    "rf_core_features": {
+        "model": "random_forest",
+        "features": CORE_FEATURES,
+        "params": {"n_estimators": 200},
+    },
+    "gradient_boosting": {
+        "model": "gradient_boosting",
+        "features": ALL_FEATURES,
+        "params": {"n_estimators": 200, "learning_rate": 0.05, "max_depth": 3},
+    },
+    "ridge": {"model": "ridge", "features": ALL_FEATURES, "params": {"alpha": 1.0}},
 }
 
 
@@ -58,9 +88,11 @@ def check_env_vars() -> None:
         logger.error(f"Missing required environment variables: {', '.join(missing)}")
         sys.exit(1)
 
+
 def load_data(path: str) -> pd.DataFrame:
     df = pd.read_parquet(path)
     return df
+
 
 def build_model(model_type: str, params: dict):
     if model_type == "random_forest":
@@ -71,6 +103,7 @@ def build_model(model_type: str, params: dict):
         # linear models need scaled inputs, so we chain a scaler and the model
         return make_pipeline(StandardScaler(), Ridge(**params))
     raise ValueError(f"Unknown model type: {model_type}")
+
 
 def train_model(setup_name: str):
     check_env_vars()
@@ -85,16 +118,18 @@ def train_model(setup_name: str):
         mlflow.set_tag("setup", setup_name)
         mlflow.log_param("feature_set", ",".join(features))
         mlflow.log_param("n_features", len(features))
-    
+
         logger.info(f"Loading data from {DATA_FILE}")
         df = load_data(DATA_FILE)
 
         missing = [c for c in features + [TARGET] if c not in df.columns]
         if missing:
-            raise ValueError(f"Columns missing in dataset: {missing}. Found: {list(df.columns)}")
+            raise ValueError(
+                f"Columns missing in dataset: {missing}. Found: {list(df.columns)}"
+            )
 
         X = df[features]
-        y = df[TARGET]     # output: the quality score
+        y = df[TARGET]  # output: the quality score
 
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=TEST_SIZE, random_state=RANDOM_STATE
@@ -129,7 +164,7 @@ def train_model(setup_name: str):
             "setup": setup_name,
             "mlflow_run_id": run.info.run_id,
             "model_type": type(model).__name__,
-            "trained_at": datetime.now(timezone.utc).isoformat(),
+            "trained_at": datetime.now(UTC).isoformat(),
             "data_file": DATA_FILE,
             "target": TARGET,
             "features": features,
@@ -145,8 +180,13 @@ def train_model(setup_name: str):
 
         mlflow.log_artifact(METADATA_FILE)
 
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Train a wine quality model and track it with MLflow")
-    parser.add_argument("setup", choices=SETUPS.keys(), help="Name of the experiment setup to run")
+    parser = argparse.ArgumentParser(
+        description="Train a wine quality model and track it with MLflow"
+    )
+    parser.add_argument(
+        "setup", choices=SETUPS.keys(), help="Name of the experiment setup to run"
+    )
     args = parser.parse_args()
     train_model(args.setup)
