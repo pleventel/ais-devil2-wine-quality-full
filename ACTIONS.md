@@ -1206,3 +1206,804 @@ git branch -d feature/api
 ```
 
 🎉 This section is finished! Our model is now a real service: validated input, one-time model loading, auto-generated documentation – and packaged so that it runs anywhere Docker runs.
+
+
+## ⚙️ Phase 6: GitHub & CI Pipeline
+> Configure it to be a safe working environment
+> 
+> - Protect the trunk. Make sure that nobody can push to it or merge any PR without checks passing
+> - Set up branch policies to require PR reviews and passing checks
+> - Do not allow secrets to be added to Git
+> 
+> Create a GitHub Actions workflow for training:
+> 
+> - Triggers if training relevant data or code has changed. Allows manual dispatch
+> - Pulls the data with DVC
+> - Runs `wine_quality_training.py` and logs results to MLflow
+> 
+> Create a GitHub Actions workflow for the API:
+> 
+> - Builds the Docker image and pushes it to the GitHub Container Registry (GHCR)
+> 
+> Make sure that both workflows 
+> 
+> - Run linting on the code
+> - Run secret scanning and security checks
+> - Run the unit tests
+> 
+> ✅ Every push to `main` triggers both workflows; the Docker image is available on GHCR.
+
+In this phase, we transition from running everything manually on our computer to automated **Continuous Integration (CI)** with GitHub Actions.
+
+The important idea is that `main` becomes our **trunk**: we don't just hope that the code is correct — GitHub actively prevents broken code from being merged. Every relevant change is checked automatically, training can be reproduced on a clean GitHub runner, and the API is packaged and published automatically.
+
+### Step 0: 🛫 Switch to a feature branch & set up dev tools
+
+Start by creating a feature branch. We don't want to experiment with branch protection and workflows directly on `main`.
+
+~~~bash
+git checkout -b feature/ci-pipeline
+~~~
+
+To support automated linting and unit testing, add the development dependencies:
+
+~~~bash
+uv add --dev ruff pytest httpx2
+~~~
+
+Now synchronize the lock file:
+
+~~~bash
+uv sync
+~~~
+
+> 💡 `ruff` is our linter. `pytest` is our unit testing framework. They are development dependencies because they are needed to **develop and verify** the project, but they are not needed to run the production API.
+
+#### Update `pyproject.toml`
+In order to run tests, we have to update our `pyproject.toml` file. Add this to the end of it:
+~~~toml
+[tool.pytest.ini_options]
+pythonpath = ["."]
+~~~
+
+### Step 1: Add a unit test
+
+We need an actual test suite before we can require tests to pass in CI.
+
+Create the directory and file:
+
+~~~bash
+mkdir -p tests
+touch tests/test_api.py
+~~~
+
+Put this into `tests/test_api.py`:
+
+~~~python
+from fastapi.testclient import TestClient
+
+from wine_quality_api import app
+
+
+client = TestClient(app)
+
+
+def test_docs_endpoint():
+    response = client.get("/docs")
+
+    assert response.status_code == 200
+~~~
+
+Run it locally:
+
+~~~bash
+uv run pytest
+~~~
+
+You should see that one test passed.
+
+#### ❗ Don't forget to commit your changes!
+As everything worked out, save this properly with git.
+~~~bash
+git add tests/ pyproject.toml uv.lock
+git commit -m "Added first unit test"
+~~~
+
+### Step 2: 🔍 Check the code locally before CI
+Before making GitHub do the work for us, run the same checks locally.
+
+#### Lint the project
+~~~bash
+uv run ruff check .
+~~~
+
+If everything is fine, Ruff should report:
+
+~~~text
+All checks passed!
+~~~
+
+If it finds problems, fix them before continuing. You can do this automatically with:
+~~~bash
+uv run ruff format .
+~~~
+
+If more problems occur, try also `uv run ruff check . --fix`.
+
+> 🤔 **Linting vs formatting:** linting looks for problematic code, while formatting changes the appearance of the code to follow a consistent style. We will use `ruff check` as the CI gate because it can fail the workflow when it finds a problem.
+
+#### Run the tests
+
+~~~bash
+uv run pytest
+~~~
+
+#### Run the dependency security scan
+
+The course CI example uses `uv-secure` to inspect the versions recorded in `uv.lock`:
+
+~~~bash
+uvx uv-secure --config=pyproject.toml
+~~~
+
+This checks the project's dependencies against known vulnerabilities.
+
+> ⚠️ A security scanner does not prove that the application is secure. It is one automated layer of defence. It is especially useful for catching vulnerable third-party dependencies.
+
+#### ❗ Don't forget to commit your changes!
+We reformatted all of your python files, we want to save these changes.
+~~~bash
+git add wine_quality_training.py wine_quality_api.py download_model.py
+git commit -m "Ran ruff checks & reformatting"
+~~~
+
+### Step 3: 🛡️ Secure the GitHub repository
+
+Before creating the workflows, configure GitHub itself so that the CI checks actually matter.
+
+#### 3.1 Enable Secret Scanning and Push Protection
+
+On GitHub:
+
+1. Open your repository.
+2. Go to **Settings** → **Code security and analysis**.
+3. Enable **Secret scanning** if it is available.
+4. Enable **Push protection** if it is available.
+
+> 🔒 **What does Push Protection do?**
+>
+> Suppose you accidentally write:
+>
+> ~~~python
+> DAGS_HUB_TOKEN = "my-real-token"
+> ~~~
+>
+> and try to push it. Push protection can detect the credential-like value and block the push before the secret reaches the remote repository.
+>
+> This is especially important for this project because DagsHub/MLflow credentials are needed by CI. **Credentials belong in GitHub Secrets, never in Python files, YAML files, `.dvc/config`, or committed configuration.**
+
+#### 3.2 Add the CI secrets
+
+Our GitHub Actions runners need credentials to access the DagsHub DVC remote and MLflow server.
+
+Go to:
+
+**Settings → Secrets and variables → Actions → New repository secret**
+
+Create:
+
+| Secret | What it contains |
+|---|---|
+| `DAGSHUB_USERNAME` | Your DagsHub username |
+| `DAGSHUB_TOKEN` | Your DagsHub access token |
+
+We will use these secrets for both DVC and MLflow.
+
+> 🔐 **Why two GitHub Secrets instead of writing the values directly into the workflow?**
+>
+> GitHub Secrets are encrypted and exposed to the workflow only when explicitly referenced. The YAML file can therefore be committed safely.
+>
+> Never do this:
+>
+> ~~~yaml
+> MLFLOW_TRACKING_PASSWORD: "my-real-password"
+> ~~~
+>
+> Instead:
+>
+> ~~~yaml
+> MLFLOW_TRACKING_PASSWORD: ${{ secrets.DAGSHUB_TOKEN }}
+> ~~~
+
+### Step 4: Protect the `main` branch
+Now we make the trunk safe. Go to **Settings → Rules → Rulesets → New branch ruleset**
+
+Configure the rule/ruleset for: `main`
+
+Enable the following:
+
+1. **Require a pull request before merging**
+  - Require at least **1 approval**
+2. **Require status checks to pass before merging**
+3. **Require branches to be up to date before merging**
+4. **Do not allow bypassing the above settings**
+
+Also make sure that direct pushes to `main` are not permitted.
+
+After the workflows have run at least once, GitHub will know their check names. Select the checks corresponding to our CI jobs:
+
+~~~text
+Lint and Test
+Security Checks
+Train and Track
+Build and Push GHCR
+~~~
+
+> ⚠️ **Important:** GitHub can only require a status check that has actually appeared in the repository. If you create the branch protection rule before the workflows have run, the required-check list may not contain the names yet. Run the workflows once, then return to the branch protection settings.
+
+### Step 5: Create the training workflow
+
+GitHub Actions looks for workflow files in:
+
+~~~text
+.github/workflows/
+~~~
+
+Create the directory and workflow:
+
+~~~bash
+mkdir -p .github/workflows
+touch .github/workflows/training.yml
+~~~
+
+The training workflow needs to:
+
+1. Run on relevant pull requests.
+2. Run on every push to `main`.
+3. Allow manual execution.
+4. Install the project.
+5. Run Ruff.
+6. Run the security scan.
+7. Run the unit tests.
+8. Configure DVC credentials.
+9. Pull the Parquet dataset with DVC.
+10. Configure MLflow.
+11. Run `wine_quality_training.py`.
+
+Put the following into `.github/workflows/training.yml`:
+
+~~~yaml
+name: Training Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "wine_quality_training.py"
+      - "data/**"
+      - "*.dvc"
+      - "data/*.dvc"
+      - "dvc.yaml"
+      - "dvc.lock"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/training.yml"
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-test:
+    name: Lint and Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install project
+        run: uv sync --frozen
+
+      - name: Lint code
+        run: uv run ruff check . --output-format=github
+
+      - name: Run unit tests
+        run: uv run pytest
+
+  security:
+    name: Security Checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Scan dependencies
+        run: |
+          set -o pipefail
+          echo "### 🛡️ Security Audit Results" >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          uvx uv-secure --config=pyproject.toml | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```'
+
+      - name: Scan for secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  train:
+    name: Train and Track
+    runs-on: ubuntu-latest
+    needs:
+      - lint-and-test
+      - security
+
+    env:
+      DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
+      DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
+      MLFLOW_TRACKING_URI: https://dagshub.com/${{ secrets.DAGSHUB_USERNAME }}/ais-devil2-wine-quality-full.mlflow
+      MLFLOW_TRACKING_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
+      MLFLOW_TRACKING_PASSWORD: ${{ secrets.DAGSHUB_TOKEN }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install project
+        run: uv sync --frozen
+
+      - name: Configure DVC credentials
+        run: |
+          uv run dvc remote modify origin --local access_key_id "$DAGSHUB_TOKEN"
+          uv run dvc remote modify origin --local secret_access_key "$DAGSHUB_TOKEN"
+
+      - name: Pull training data
+        run: uv run dvc pull
+
+      - name: Train model and log to MLflow
+        run: uv run wine_quality_training.py rf_baseline
+~~~
+
+#### ❗ Don't forget to commit your changes!
+Let's commit now the created `training.yml` file!
+~~~bash
+git add .github/workflows/training.yml
+git commit -m "Added training workflow"
+~~~
+
+### Step 6: Understand the training workflow
+There are several important ideas here that are worth noting.
+
+#### `on.push`
+
+~~~yaml
+push:
+  branches:
+    - main
+~~~
+
+This makes every push to `main` start the training workflow.
+
+This is important because the final assignment explicitly requires that **every push to `main` triggers both workflows**.
+
+#### `on.pull_request.paths`
+
+~~~yaml
+pull_request:
+  branches:
+    - main
+  paths:
+    - "wine_quality_training.py"
+    - "data/**"
+    - "*.dvc"
+    - "pyproject.toml"
+    - "uv.lock"
+~~~
+
+This prevents irrelevant pull requests from retraining the model.
+
+For example, changing only documentation should not require a new training run.
+
+A change to the training script (`wine_quality_training.py`), as well as a change to the data or the environment (`pyproject.toml` and `uv.lock` files).
+
+> 💡 This is a useful concept: **path filters reduce unnecessary CI work**, while the unconditional `push` to `main` satisfies the assignment's requirement that every successful merge/push to the trunk starts both pipelines.
+
+#### `workflow_dispatch`
+
+~~~yaml
+workflow_dispatch:
+~~~
+
+This adds the **Run workflow** button to GitHub Actions. It is useful when you want to retrain manually without changing any code,for example, if you want to verify that the training pipeline still works after changing something on DagsHub, you can start it manually.
+
+#### `needs`
+
+~~~yaml
+needs:
+  - lint-and-test
+  - security
+~~~
+
+This means the `train` job waits until both prerequisite jobs succeed.
+If linting or security scanning fails, training does not start.
+
+#### `uv sync --frozen`
+This is particularly important in CI.
+- `uv.lock` records the exact dependency versions.
+- `--frozen` tells `uv`:
+
+This makes the CI environment reproducible.
+
+### Step 7: Configure DVC inside CI
+Your local machine already has DVC configured, but the GitHub runner starts from a clean environment. That means it does **not** have your local `.dvc/config.local`. We therefore configure the credentials during the workflow:
+
+~~~bash
+uv run dvc remote modify origin --local access_key_id "$DAGSHUB_TOKEN"
+uv run dvc remote modify origin --local secret_access_key "$DAGSHUB_TOKEN"
+~~~
+
+The important word here is **`--local`**: tt writes the credentials to DVC's local configuration rather than committing them to the repository.
+
+Remember, git only contains a pointer to the actual data and that is stored on Dagshub with Data Version Control. This is what we did in Phase 1.
+
+### Step 8: Configure MLflow inside CI
+
+The training script already contains this fail-fast check:
+
+~~~python
+REQUIRED_ENV_VARS = [
+    "MLFLOW_TRACKING_URI",
+    "MLFLOW_TRACKING_USERNAME",
+    "MLFLOW_TRACKING_PASSWORD",
+]
+~~~
+
+and:
+
+~~~python
+def check_env_vars() -> None:
+    missing = [var for var in REQUIRED_ENV_VARS if not os.environ.get(var)]
+    if missing:
+        logger.error(f"Missing required environment variables: {', '.join(missing)}")
+        sys.exit(1)
+~~~
+
+Therefore the workflow simply provides these variables through its `env` section:
+
+~~~yaml
+env:
+  MLFLOW_TRACKING_URI: https://dagshub.com/${{ secrets.DAGSHUB_USERNAME }}/ais-devil2-wine-quality-full.mlflow
+  MLFLOW_TRACKING_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
+  MLFLOW_TRACKING_PASSWORD: ${{ secrets.DAGSHUB_TOKEN }}
+~~~
+
+The training script does not need to know whether it is running on your laptop or on GitHub Actions.
+
+> 💡 **That is an important CI principle:** the code stays the same; the environment provides the configuration.
+
+### Step 9: Create the API workflow
+
+Now create the second workflow:
+
+~~~bash
+touch .github/workflows/api.yml
+~~~
+
+This workflow needs to:
+
+1. Run on every push to `main`.
+2. Run on pull requests.
+3. Allow manual execution.
+4. Run linting.
+5. Run security checks.
+6. Run unit tests.
+7. Download the registered model.
+8. Build the Docker image.
+9. Authenticate with GHCR.
+10. Push the image to GHCR.
+
+Put this into `.github/workflows/api.yml`:
+
+~~~yaml
+name: API Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+  pull_request:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-test:
+    name: Lint and Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install project
+        run: uv sync --frozen
+
+      - name: Lint code
+        run: uv run ruff check . --output-format=github
+
+      - name: Run unit tests
+        run: uv run pytest
+
+  security:
+    name: Security Checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Scan dependencies
+        run: |
+          set -o pipefail
+          echo "### 🛡️ Security Audit Results" >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          uvx uv-secure --config=pyproject.toml | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```'
+
+      - name: Scan for secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-and-push:
+    name: Build and Push GHCR
+    runs-on: ubuntu-latest
+    needs:
+      - lint-and-test
+      - security
+
+    permissions:
+      contents: read
+      packages: write
+
+    env:
+      MLFLOW_TRACKING_URI: https://dagshub.com/${{ secrets.DAGSHUB_USERNAME }}/ais-devil2-wine-quality-full.mlflow
+      MLFLOW_TRACKING_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
+      MLFLOW_TRACKING_PASSWORD: ${{ secrets.DAGSHUB_TOKEN }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install project
+        run: uv sync --frozen
+
+      - name: Download registered model
+        run: uv run download_model.py
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/wine-quality-api
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+~~~
+
+### Step 10: 🤔 Understand the GHCR part
+
+The GitHub Container Registry is GitHub's registry for container images.
+
+The important line is:
+
+~~~yaml
+registry: ghcr.io
+~~~
+
+The image name is generated from:
+
+~~~yaml
+ghcr.io/${{ github.repository_owner }}/wine-quality-api
+~~~
+
+For this repository, the resulting image will look conceptually like:
+
+~~~text
+ghcr.io/pleventel/wine-quality-api
+~~~
+
+The exact capitalization/normalisation of the image name follows GHCR's requirements.
+
+#### Why do we need `packages: write`?
+
+The workflow initially has:
+
+~~~yaml
+permissions:
+  contents: read
+~~~
+
+because we want the default token to have as little access as possible.
+
+The build job then explicitly requests:
+
+~~~yaml
+permissions:
+  contents: read
+  packages: write
+~~~
+
+This gives that job permission to publish a package to GHCR.
+
+This is the *principle of least privilege*: Give a workflow only the permissions it actually needs.
+
+#### Why use `GITHUB_TOKEN` instead of another Docker password?
+
+GitHub automatically creates:
+
+~~~text
+secrets.GITHUB_TOKEN
+~~~
+
+for each workflow run. 
+It can authenticate the workflow against GitHub services, including GHCR. This means we don't need to create another personal GitHub access token just to publish the image.
+
+### Step 11: Why does the API workflow download the model?
+Remember the Dockerfile from Phase 5:
+
+~~~dockerfile
+COPY wine_quality_api.py wine_quality_model.pkl ./
+~~~
+
+The Docker image therefore **needs the model file to exist before `docker build` starts**.
+
+But `.gitignore` deliberately keeps `wine_quality_model.pkl` out of Git, so a fresh GitHub runner does not have the model.
+
+The workflow solves this by running:
+
+~~~bash
+uv run download_model.py
+~~~
+
+The model version in `.model-version` determines what gets downloaded, and that exact model becomes part of the Docker image.
+
+### Step 12: Test the workflows
+As we were continously commiting everything, there's nothing really new to commit, but notice, we haven't pushed our work yet. Let's do it now.
+~~~bash
+git push -u origin feature/ci-pipeline
+~~~
+
+Now open your repository on GitHub and go to:
+
+**Actions**
+
+You should see both workflows.
+
+You can also create a Pull Request:
+
+~~~text
+feature/ci-pipeline → main
+~~~
+
+The PR should show the required checks.
+
+### Step 13: Check the Docker image in GHCR
+After `api.yml` completes successfully, open your GitHub repository.
+
+Look for the **Packages** section.
+
+You should find:
+
+~~~text
+wine-quality-api
+~~~
+
+The image should have at least a `latest` tag when the workflow ran from the default branch.
+
+You can also pull it locally:
+
+~~~bash
+docker pull ghcr.io/<YOUR_GITHUB_USERNAME>/wine-quality-api:latest
+~~~
+
+Then run it:
+
+~~~bash
+docker run --rm -p 8000:8000 ghcr.io/<YOUR_GITHUB_USERNAME>/wine-quality-api:latest
+~~~
+
+Now open [http://localhost:8000/docs](http://localhost:8000/docs) and test the `/predict` endpoint.
+
+🎉 The Docker image that you just ran was not built manually on your laptop — it was built by CI and published to GHCR.
+
+### Step 14: Pull Request and merge
+If you go to your github repository, you'll see that there're commits ready to merge. Create a pull request and merge them!
+
+If everything was successful, you can now merge your branch and delete your feature branch too.
+~~~bash
+git merge feature/ci-pipeling
+git push origin main
+~~~
+
+🎉 This section is also officially finished!
+
