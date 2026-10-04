@@ -54,3 +54,12 @@ class WineFeatures(BaseModel):
 
 class PredictionResponse(BaseModel):
     quality: float = Field(description="Predicted wine quality score")
+
+app = FastAPI(title="Wine Quality API", version="0.1.0", lifespan=lifespan)
+
+
+@app.post("/predict", response_model=PredictionResponse)
+def predict(wine: WineFeatures) -> PredictionResponse:
+    X = pd.DataFrame([wine.model_dump()], columns=FEATURES)
+    prediction = ml_models["wine_quality"].predict(X)[0]
+    return PredictionResponse(quality=round(float(prediction), 2))
